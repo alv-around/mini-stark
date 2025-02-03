@@ -1,21 +1,18 @@
-use ark_ff::Field;
+use crate::util::is_power_of_two;
+use ark_ff::PrimeField;
 use digest::{generic_array::GenericArray, Digest, OutputSizeUser};
 use std::marker::PhantomData;
 
-type Hash<D> = GenericArray<u8, <D as OutputSizeUser>::OutputSize>;
+pub type Hash<D> = GenericArray<u8, <D as OutputSizeUser>::OutputSize>;
 
 // MerkleTree where all nodes are stored in memory
-struct MerkleTree<D: Digest, F> {
+pub struct MerkleTree<D: Digest, F> {
     nodes: Vec<Hash<D>>,
     leaf_number: usize,
     input: PhantomData<F>,
 }
 
-fn is_power_of_2(number: usize) -> bool {
-    number & (number - 1) == 0
-}
-
-impl<F: Field, D: Digest> MerkleTree<D, F> {
+impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     pub fn get_leafs(&self) -> &[Hash<D>] {
         &self.nodes[0..self.leaf_number]
     }
@@ -76,17 +73,17 @@ impl<F: Field, D: Digest> MerkleTree<D, F> {
         hasher.finalize()
     }
 
-    pub fn generate_tree(leafs: Vec<F>) -> Self {
+    pub fn generate_tree(leafs: &Vec<F>) -> Self {
         let leaf_number = leafs.len();
         assert!(
-            is_power_of_2(leaf_number),
+            is_power_of_two(leaf_number),
             "Number of tree leafs must be a power of 2"
         );
 
         let capacity = (leaf_number * 2) - 1;
         let mut nodes = Vec::with_capacity(capacity);
         for leaf in leafs {
-            let hashed_leaf = MerkleTree::<D, F>::hash_leaf(leaf);
+            let hashed_leaf = MerkleTree::<D, F>::hash_leaf(leaf.clone());
             nodes.push(hashed_leaf);
         }
 
@@ -112,26 +109,23 @@ impl<F: Field, D: Digest> MerkleTree<D, F> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use ark_ff::fields::{MontBackend, MontConfig};
-    use ark_ff::Fp;
+    use crate::field::Goldilocks;
     use sha2::Sha256;
 
-    #[derive(MontConfig)]
-    #[modulus = "17"]
-    #[generator = "3"]
-    pub struct Fp17Config;
-    pub type Fp17 = Fp<MontBackend<Fp17Config, 1>, 1>;
-
-    fn make_tree() -> MerkleTree<Sha256, Fp17> {
-        let leafs: Vec<Fp17> = (0..8).map(|i| Fp17::from(i)).collect();
-        MerkleTree::generate_tree(leafs)
+    fn make_tree() -> MerkleTree<Sha256, Goldilocks> {
+        let leafs: Vec<Goldilocks> = (0..8).map(|i| Goldilocks::from(i)).collect();
+        MerkleTree::generate_tree(&leafs)
     }
 
     #[test]
     #[should_panic]
     fn test_arbitrary_number_of_leafs() {
-        let leafs = vec![Fp17::from(0), Fp17::from(1), Fp17::from(2)];
-        MerkleTree::<Sha256, _>::generate_tree(leafs);
+        let leafs = vec![
+            Goldilocks::from(0),
+            Goldilocks::from(1),
+            Goldilocks::from(2),
+        ];
+        MerkleTree::<Sha256, _>::generate_tree(&leafs);
     }
 
     #[test]
@@ -148,8 +142,8 @@ mod test {
         assert_eq!(tree.nodes.len(), 15);
         assert_eq!(*tree.get_root(), hash_value);
 
-        assert_eq!(tree.get_leaf_index(Fp17::from(2)), Some(2));
-        assert_eq!(tree.get_leaf_index(Fp17::from(5)), Some(5));
+        assert_eq!(tree.get_leaf_index(Goldilocks::from(2)), Some(2));
+        assert_eq!(tree.get_leaf_index(Goldilocks::from(5)), Some(5));
     }
 
     #[test]
