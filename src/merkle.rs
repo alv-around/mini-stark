@@ -12,6 +12,11 @@ pub struct MerkleTree<D: Digest, F> {
     input: PhantomData<F>,
 }
 
+pub struct MerklePath<D: Digest, F> {
+    pub leaf: F,
+    path: Vec<Hash<D>>,
+}
+
 impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     pub fn get_leafs(&self) -> &[Hash<D>] {
         &self.nodes[0..self.leaf_number]
@@ -20,6 +25,24 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     pub fn get_root(&self) -> &Hash<D> {
         let capacity = self.nodes.capacity();
         &self.nodes[capacity - 1]
+    }
+
+    pub fn get_leaf_number(&self) -> usize {
+        self.leaf_number
+    }
+
+    pub fn check_proof(&self, proof: MerklePath<D, F>) -> bool {
+        let leaf = MerkleTree::<D, F>::hash_leaf(proof.leaf);
+        let mut hasher = D::new();
+        hasher.update(leaf);
+        for level in proof.path {
+            hasher.update(level)
+        }
+        let root = hasher.finalize();
+        if root == *self.get_root() {
+            return true;
+        }
+        false
     }
 
     fn calculate_path(&self, index: usize) -> Vec<Hash<D>> {

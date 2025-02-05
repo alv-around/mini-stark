@@ -1,5 +1,5 @@
 use ark_ff::fields::{MontBackend, MontConfig};
-use ark_ff::{FftField, Fp};
+use ark_ff::Fp;
 
 #[derive(MontConfig)]
 #[modulus = "2147483647"]
