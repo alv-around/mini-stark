@@ -79,7 +79,7 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
         let y2 = proof2.leaf;
         let slope = (y2 - y1) / (x_point2 - x_point1);
         let expected_y = slope * (self.domain.element(alpha) - x_point1) + y1;
-        let actual_y = self.poly_star.evaluate(&self.domain.element(alpha));
+        let actual_y = self.poly_star.evaluate(&self.domain.element(2 * beta));
         assert_eq!(expected_y, actual_y, "Linearity check failed");
 
         // check that elements where rightly committed
