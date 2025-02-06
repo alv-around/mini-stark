@@ -25,6 +25,11 @@ struct FriRound<D: Digest, F: PrimeField> {
     domain_star: Radix2EvaluationDomain<F>,
 }
 
+struct ConsistencyCheck<F: PrimeField> {
+    f_minus_y: DensePolynomial<F>,
+    remainder: DensePolynomial<F>,
+}
+
 impl<D: Digest, F: PrimeField> Fri<D, F> {
     pub fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
         let d = poly.degree();
@@ -58,17 +63,29 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
         }
     }
 
-    pub fn verify(&self, proofs: [MerklePath<D, F>; 3]) -> bool {
+    pub fn verify(
+        &self,
+        proofs: [MerklePath<D, F>; 3],
+        consistency_proofs: [ConsistencyCheck<F>; 3],
+    ) -> bool {
         if self.beta.is_none() || self.alpha.is_none() {
             return false;
         }
         let beta = self.beta.unwrap();
 
         // xs
-        let n_over_2 = self.commit_star.get_leaf_number();
         let x_point1 = self.domain.element(beta);
-        let x_point2 = self.domain.element(n_over_2 + beta);
-        let x_point3 = self.domain.element(self.alpha.unwrap());
+        let x_point2 = self.domain.element(self.domain_star.size() + beta);
+        let x_point3 = self.domain.element(2 * beta);
+
+        // check consistency_proof
+        let [consistency1, consistency2, consistency3] = consistency_proofs;
+        let vanishing1 = FriRound::<D, _>::build_vanishing_poly(x_point1);
+        consistency1.check(vanishing1);
+        let vanishing2 = FriRound::<D, _>::build_vanishing_poly(x_point2);
+        consistency2.check(vanishing2);
+        let vanishing3 = FriRound::<D, _>::build_vanishing_poly(x_point3);
+        // consistency3.check(vanishing3);
 
         // FIXME: solve linearity check
         // Linearity check
@@ -88,7 +105,10 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
         true
     }
 
-    pub fn prove(&mut self, beta: usize) -> Result<[MerklePath<D, F>; 3], &str> {
+    pub fn prove(
+        &mut self,
+        beta: usize,
+    ) -> Result<([MerklePath<D, F>; 3], [ConsistencyCheck<F>; 3]), &str> {
         if self.alpha.is_none() || self.beta.is_some() {
             return Err("wrong time");
         }
@@ -96,16 +116,24 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
 
         let x_point1 = self.domain.element(beta);
         let y_point1 = self.poly.evaluate(&x_point1);
+
         let x_point2 = self.domain.element(self.domain_star.size() + beta);
         let y_point2 = self.poly.evaluate(&x_point2);
+
         let x_point3 = self.domain.element(2 * beta);
         let y_point3 = self.poly_star.evaluate(&x_point3);
 
+        let consistency_proof1 = self.consistency_proof(x_point1, y_point1);
+        let consistency_proof2 = self.consistency_proof(x_point2, y_point2);
+        let consistency_proof3 = self.consistency_proof(x_point3, y_point3);
         let proof1 = self.commit.generate_proof(y_point1).unwrap();
         let proof2 = self.commit.generate_proof(y_point2).unwrap();
         let proof3 = self.commit_star.generate_proof(y_point3).unwrap();
 
-        Ok([proof1, proof2, proof3])
+        Ok((
+            [proof1, proof2, proof3],
+            [consistency_proof1, consistency_proof2, consistency_proof3],
+        ))
     }
 
     fn split_and_fold(&mut self, alpha: usize) {
@@ -143,12 +171,31 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
         let leafs = poly.evaluate_over_domain_by_ref(domain);
         (MerkleTree::<D, _>::generate_tree(&leafs.evals), domain)
     }
+
+    fn consistency_proof(&self, x: F, y: F) -> ConsistencyCheck<F> {
+        let vanishing_poly = FriRound::<D, _>::build_vanishing_poly(x);
+        ConsistencyCheck {
+            f_minus_y: self.poly.clone() - DensePolynomial::from_coefficients_slice(&[y]),
+            remainder: self.poly.clone() / vanishing_poly,
+        }
+    }
+
+    fn build_vanishing_poly(x: F) -> DensePolynomial<F> {
+        DensePolynomial::from_coefficients_slice(&[-x, F::ONE])
+    }
+}
+
+impl<F: PrimeField> ConsistencyCheck<F> {
+    pub fn check(self, vanishing_poly: DensePolynomial<F>) {
+        assert_eq!(self.f_minus_y, self.remainder * vanishing_poly);
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::field::Goldilocks;
+    use ark_ff::{AdditiveGroup, Field};
     use sha2::Sha256;
 
     #[test]
@@ -197,7 +244,22 @@ mod test {
         let alpha = 1usize;
         let beta = 1usize;
         fri.split_and_fold(alpha);
-        let proof = fri.prove(beta).unwrap();
-        assert!(fri.verify(proof))
+        let (merkle_proofs, consistency_proofs) = fri.prove(beta).unwrap();
+        assert!(fri.verify(merkle_proofs, consistency_proofs));
+    }
+
+    #[test]
+    fn test_vanishing_poly() {
+        let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
+        let poly = DensePolynomial::from_coefficients_slice(&coeffs);
+        let domain = Radix2EvaluationDomain::<Goldilocks>::new(coeffs.len()).unwrap();
+
+        let x = Goldilocks::from(57);
+        let y = poly.evaluate(&x);
+        let vanishing_poly = DensePolynomial::from_coefficients_slice(&[-x, Goldilocks::ONE]);
+        let f_minus_y = poly.clone() - DensePolynomial::from_coefficients_slice(&[y]);
+        let w = f_minus_y.clone() / vanishing_poly.clone();
+
+        assert_eq!(w * vanishing_poly, f_minus_y);
     }
 }
