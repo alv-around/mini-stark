@@ -1,6 +1,7 @@
 use crate::util::is_power_of_two;
 use ark_ff::PrimeField;
 use digest::{generic_array::GenericArray, Digest, OutputSizeUser};
+use std::iter::zip;
 use std::marker::PhantomData;
 
 pub type Hash<D> = GenericArray<u8, <D as OutputSizeUser>::OutputSize>;
@@ -12,9 +13,20 @@ pub struct MerkleTree<D: Digest, F> {
     input: PhantomData<F>,
 }
 
-pub struct MerklePath<D: Digest, F> {
+pub struct MerklePath<D: Digest, F: PrimeField> {
     pub leaf: F,
     path: Vec<Hash<D>>,
+    path_flag: Vec<bool>,
+}
+
+impl<D: Digest, F: PrimeField> MerklePath<D, F> {
+    fn new(leaf: F, path: Vec<Hash<D>>, path_flag: Vec<bool>) -> Self {
+        Self {
+            leaf,
+            path,
+            path_flag,
+        }
+    }
 }
 
 impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
@@ -32,37 +44,67 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     }
 
     pub fn check_proof(&self, proof: MerklePath<D, F>) -> bool {
-        let leaf = MerkleTree::<D, F>::hash_leaf(proof.leaf);
-        let mut hasher = D::new();
-        hasher.update(leaf);
-        for level in proof.path {
-            hasher.update(level)
+        if proof.path.len() != proof.path_flag.len() {
+            return false;
         }
-        let root = hasher.finalize();
-        if root == *self.get_root() {
+
+        let mut previous = MerkleTree::<D, _>::hash_leaf(proof.leaf);
+        for (level, flag) in zip(proof.path, proof.path_flag) {
+            let mut hasher = D::new();
+            if flag {
+                hasher.update(level);
+                hasher.update(previous);
+            } else {
+                hasher.update(previous);
+                hasher.update(level);
+            }
+            previous = hasher.finalize();
+        }
+        if previous == *self.get_root() {
             return true;
         }
         false
     }
 
-    fn calculate_path(&self, index: usize) -> Vec<Hash<D>> {
+    pub fn generate_proof(&self, leaf: F) -> Result<MerklePath<D, F>, &str> {
+        let node = MerkleTree::<D, _>::hash_leaf(leaf);
+        let leaf_index = self.get_leaf_index(&node);
+        if leaf_index.is_none() {
+            return Err("leaf is not part of the tree");
+        }
+        let (path, path_flag) = self.calculate_path(leaf_index.unwrap());
+        Ok(MerklePath::<D, F>::new(leaf, path, path_flag))
+    }
+
+    fn calculate_path(&self, index: usize) -> (Vec<Hash<D>>, Vec<bool>) {
         // if number is a power of 2, trailing_zeros is same as log2
         let levels = self.leaf_number.trailing_zeros() as usize;
-        let mut path = Vec::with_capacity(levels);
+        let mut idx_path = Vec::with_capacity(levels);
+        let mut path_flag = Vec::with_capacity(levels);
         let mut current_idx = index;
         for _ in 0..levels {
-            let neighbor: usize = self.get_neighbor_idx(current_idx);
+            let (neighbor, flag) = self.get_neighbor_idx(current_idx);
             let parent = self.get_parent_idx(current_idx);
-            path.push(neighbor);
+            idx_path.push(neighbor);
+            path_flag.push(flag);
             current_idx = parent;
         }
 
-        path.into_iter().map(|i| self.nodes[i].clone()).collect()
+        let path = idx_path
+            .into_iter()
+            .map(|i| self.nodes[i].clone())
+            .collect();
+        (path, path_flag)
     }
 
-    fn get_neighbor_idx(&self, index: usize) -> usize {
+    fn get_neighbor_idx(&self, index: usize) -> (usize, bool) {
         let is_uneven = index % 2;
-        index + 1 - (2 * is_uneven)
+        let flag = match is_uneven {
+            0 => false,
+            1 => true,
+            _ => panic!("something went very wrong"),
+        };
+        (index + 1 - (2 * is_uneven), flag)
     }
 
     fn get_parent_idx(&self, index: usize) -> usize {
@@ -73,10 +115,9 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
         (remaining >> 1) + index
     }
 
-    fn get_leaf_index(&self, node: F) -> Option<usize> {
-        let digest = MerkleTree::<D, F>::hash_leaf(node);
+    fn get_leaf_index(&self, node: &Hash<D>) -> Option<usize> {
         for (i, value) in self.get_leafs().iter().enumerate() {
-            if digest == *value {
+            if *node == *value {
                 return Some(i);
             }
         }
@@ -84,7 +125,7 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
         None
     }
 
-    fn hash_leaf(value: F) -> Hash<D> {
+    pub fn hash_leaf(value: F) -> Hash<D> {
         D::digest(value.to_string())
     }
 
@@ -165,16 +206,18 @@ mod test {
         assert_eq!(tree.nodes.len(), 15);
         assert_eq!(*tree.get_root(), hash_value);
 
-        assert_eq!(tree.get_leaf_index(Goldilocks::from(2)), Some(2));
-        assert_eq!(tree.get_leaf_index(Goldilocks::from(5)), Some(5));
+        let hash_idx2 = MerkleTree::<Sha256, _>::hash_leaf(Goldilocks::from(2));
+        let hash_idx5 = MerkleTree::<Sha256, _>::hash_leaf(Goldilocks::from(5));
+        assert_eq!(tree.get_leaf_index(&hash_idx2), Some(2));
+        assert_eq!(tree.get_leaf_index(&hash_idx5), Some(5));
     }
 
     #[test]
     fn test_neighbor_index() {
         let tree = make_tree();
 
-        assert_eq!(tree.get_neighbor_idx(4), 5);
-        assert_eq!(tree.get_neighbor_idx(7), 6);
+        assert_eq!(tree.get_neighbor_idx(4).0, 5);
+        assert_eq!(tree.get_neighbor_idx(7).0, 6);
     }
 
     #[test]
@@ -192,7 +235,7 @@ mod test {
     fn test_merkle_path() {
         let tree = make_tree();
 
-        let path1 = tree.calculate_path(1);
+        let (path1, _) = tree.calculate_path(1);
         let path_raw = vec![
             *Hash::<Sha256>::from_slice(&[
                 95, 236, 235, 102, 255, 200, 111, 56, 217, 82, 120, 108, 109, 105, 108, 121, 194,
@@ -209,7 +252,7 @@ mod test {
         ];
         assert_eq!(path1, path_raw);
 
-        let path2 = tree.calculate_path(4);
+        let (path2, _) = tree.calculate_path(4);
         let path_raw = vec![
             *Hash::<Sha256>::from_slice(&[
                 239, 45, 18, 125, 227, 123, 148, 43, 170, 208, 97, 69, 229, 75, 12, 97, 154, 31,
@@ -225,5 +268,29 @@ mod test {
             ]),
         ];
         assert_eq!(path2, path_raw);
+    }
+
+    #[test]
+    fn test_generate_check_proof() {
+        let tree = make_tree();
+        let proof = tree.generate_proof(Goldilocks::from(4)).unwrap();
+        let path_raw = vec![
+            *Hash::<Sha256>::from_slice(&[
+                239, 45, 18, 125, 227, 123, 148, 43, 170, 208, 97, 69, 229, 75, 12, 97, 154, 31,
+                34, 50, 123, 46, 187, 207, 190, 199, 143, 85, 100, 175, 227, 157,
+            ]),
+            *Hash::<Sha256>::from_slice(&[
+                19, 72, 67, 175, 127, 200, 242, 153, 80, 177, 225, 223, 183, 196, 151, 82, 224,
+                247, 183, 17, 180, 88, 238, 154, 227, 197, 202, 34, 1, 102, 214, 136,
+            ]),
+            *Hash::<Sha256>::from_slice(&[
+                196, 120, 254, 173, 12, 137, 183, 149, 64, 99, 143, 132, 76, 136, 25, 217, 164, 40,
+                23, 99, 175, 146, 114, 199, 243, 150, 135, 118, 182, 5, 35, 69,
+            ]),
+        ];
+        assert_eq!(proof.path, path_raw);
+
+        let check = tree.check_proof(proof);
+        assert!(check);
     }
 }
