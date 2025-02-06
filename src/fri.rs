@@ -8,13 +8,13 @@ use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::Digest;
 
 struct Fri<D: Digest, F: PrimeField> {
-    blowup_factor: usize,
     rounds: usize,
     round_state: FriRound<D, F>,
 }
 
 struct FriRound<D: Digest, F: PrimeField> {
     round: usize,
+    blowup_factor: usize,
     domain: Radix2EvaluationDomain<F>,
     commit: MerkleTree<D, F>,
     poly: DensePolynomial<F>,
@@ -25,8 +25,8 @@ struct FriRound<D: Digest, F: PrimeField> {
 }
 
 impl<D: Digest, F: PrimeField> Fri<D, F> {
-    pub fn new(coeffs: Vec<F>, blowup_factor: usize) -> Self {
-        let d = coeffs.len() - 1;
+    pub fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
+        let d = poly.degree();
         let domain_size = d * blowup_factor;
         if !is_power_of_two(domain_size) {
             panic!("blowup factor and degree of polynomial must be a power of 2");
@@ -34,22 +34,18 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
 
         let rounds: usize = domain_size.trailing_zeros().try_into().unwrap();
         Self {
-            blowup_factor,
             rounds,
-            round_state: FriRound::<D, F>::new(coeffs, domain_size),
+            round_state: FriRound::<D, F>::new(poly, blowup_factor),
         }
     }
 }
 
 impl<D: Digest, F: PrimeField> FriRound<D, F> {
-    fn new(coeffs: Vec<F>, domain_size: usize) -> Self {
-        let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
-        let poly = DensePolynomial::<F>::from_coefficients_vec(coeffs);
-
-        let leafs = poly.evaluate_over_domain_by_ref(domain);
-        let commit = MerkleTree::<D, _>::generate_tree(&leafs.evals);
+    fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
+        let (commit, domain) = FriRound::<D, F>::codeword_commit(&poly, blowup_factor);
         Self {
             poly,
+            blowup_factor,
             commit,
             domain,
             round: 0,
@@ -84,20 +80,12 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
 
         // check that elements where rightly committed
         assert!(self.commit.check_proof(proof1));
-        assert!(self.commit_star.check_proof(proof2));
+        assert!(self.commit.check_proof(proof2));
 
         true
     }
 
-    pub fn split_and_fold_phase(&self, alpha: F) -> (DensePolynomial<F>, MerkleTree<D, F>) {
-        let (even_poly, odd_poly) = self.split_poly();
-        let folded_poly_coeffs = self.fold_poly(alpha, even_poly, odd_poly);
-        let merkle_tree = MerkleTree::<D, F>::generate_tree(&folded_poly_coeffs.to_vec());
-
-        (folded_poly_coeffs, merkle_tree)
-    }
-
-    fn split_poly(&self) -> (DensePolynomial<F>, DensePolynomial<F>) {
+    fn split_and_fold(&mut self, alpha: usize) {
         let (mut even, mut odd) = (Vec::<F>::new(), Vec::<F>::new());
         for (i, element) in self.poly.coeffs().to_vec().into_iter().enumerate() {
             if i % 2 == 0 {
@@ -111,26 +99,22 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
             DensePolynomial::from_coefficients_vec(even),
             DensePolynomial::from_coefficients_vec(odd),
         );
-        (even_poly, odd_poly)
+
+        self.poly_star = even_poly
+            + odd_poly.naive_mul(&DensePolynomial::from_coefficients_slice(&[F::from(
+                alpha as u64,
+            )]));
+        self.alpha = Some(alpha);
     }
 
-    fn fold_poly(
-        &self,
-        alpha: F,
-        even_poly: DensePolynomial<F>,
-        odd_poly: DensePolynomial<F>,
-    ) -> DensePolynomial<F> {
-        let folded_domain_length = self.domain.size() >> 1;
-        let folded_domain = (0..folded_domain_length).map(|i| {
-            let exponent: u64 = (i * 2).try_into().unwrap();
-            self.domain.group_gen().pow(&[exponent])
-        });
-
-        let folded_coeffs = folded_domain
-            .map(|point| even_poly.evaluate(&point) + alpha * odd_poly.evaluate(&point))
-            .collect::<Vec<F>>();
-
-        DensePolynomial::<F>::from_coefficients_vec(folded_coeffs)
+    fn codeword_commit(
+        poly: &DensePolynomial<F>,
+        blowup_factor: usize,
+    ) -> (MerkleTree<D, F>, Radix2EvaluationDomain<F>) {
+        let domain_size = blowup_factor * poly.degree() + 1;
+        let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
+        let leafs = poly.evaluate_over_domain_by_ref(domain);
+        (MerkleTree::<D, _>::generate_tree(&leafs.evals), domain)
     }
 }
 
@@ -138,15 +122,31 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
 mod test {
     use super::*;
     use crate::field::Goldilocks;
+    use ark_ff::Field;
     use sha2::Sha256;
 
     #[test]
     fn test_fri_new() {
         let blowup_factor = 2usize;
         let coeffs = vec![Goldilocks::from(1), Goldilocks::from(5)];
-        let fri = Fri::<Sha256, _>::new(coeffs, blowup_factor);
+        let fri = Fri::<Sha256, _>::new(
+            DensePolynomial::from_coefficients_vec(coeffs),
+            blowup_factor,
+        );
 
         assert_eq!(fri.rounds, 1usize);
-        assert_eq!(fri.blowup_factor, 2usize);
+    }
+
+    #[test]
+    fn test_split_and_fold() {
+        let blowup_factor = 2usize;
+        let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
+        let poly = DensePolynomial::from_coefficients_slice(&coeffs);
+        let mut fri = FriRound::<Sha256, _>::new(poly, blowup_factor);
+
+        let alpha = 1usize;
+        let coeffs_result = vec![Goldilocks::from(1), Goldilocks::from(5)];
+        fri.split_and_fold(alpha);
+        assert_eq!(fri.poly_star.coeffs(), coeffs_result);
     }
 }
