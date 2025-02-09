@@ -5,6 +5,7 @@ use std::iter::zip;
 use std::marker::PhantomData;
 
 pub type Hash<D> = GenericArray<u8, <D as OutputSizeUser>::OutputSize>;
+pub struct MerkleRoot<D: Digest>(Hash<D>);
 
 // MerkleTree where all nodes are stored in memory
 pub struct MerkleTree<D: Digest, F> {
@@ -34,9 +35,9 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
         &self.nodes[0..self.leaf_number]
     }
 
-    pub fn get_root(&self) -> &Hash<D> {
+    pub fn get_root(&self) -> MerkleRoot<D> {
         let capacity = self.nodes.capacity();
-        &self.nodes[capacity - 1]
+        MerkleRoot(self.nodes[capacity - 1].clone())
     }
 
     pub fn get_leaf_number(&self) -> usize {
@@ -60,7 +61,7 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
             }
             previous = hasher.finalize();
         }
-        if previous == *self.get_root() {
+        if previous == self.get_root().0 {
             return true;
         }
         false
@@ -204,7 +205,7 @@ mod test {
 
         assert_eq!(tree.leaf_number, 8);
         assert_eq!(tree.nodes.len(), 15);
-        assert_eq!(*tree.get_root(), hash_value);
+        assert_eq!(tree.get_root().0, hash_value);
 
         let hash_idx2 = MerkleTree::<Sha256, _>::hash_leaf(Goldilocks::from(2));
         let hash_idx5 = MerkleTree::<Sha256, _>::hash_leaf(Goldilocks::from(5));
