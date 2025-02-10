@@ -69,7 +69,7 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
         if self.alpha.is_none() || self.beta.is_some() {
             return Err("wrong time");
         }
-        self.beta = Some(beta);
+        self.beta = Some(beta % self.domain.size());
         let alpha = self.alpha.unwrap();
         let mut queries = Vec::new();
         let mut points = Vec::new();
@@ -78,21 +78,19 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
         let mut previous_poly = &self.poly;
         let mut previous_commit = &self.commit;
         let mut previous_domain = &self.domain;
-        let mut previous_beta = beta;
+        let mut previous_beta = self.beta.unwrap();
         for round in self.round_state.iter() {
             assert_eq!(previous_domain.size() >> 1, round.domain.size());
 
-            let x1 = previous_domain.element(previous_beta);
-            let x2 = previous_domain.element(round.domain.size() + previous_beta);
-            let x3 = round.domain.element(previous_beta);
+            let x1 = previous_domain.element(previous_beta); // f_{u-1}(z)
+            let x2 = previous_domain.element(round.domain.size() + previous_beta); // f_{u-i}(-z)
+            let x3 = round.domain.element(previous_beta); // f_u(z^2)
+            assert_eq!(x2, x1.neg());
+            assert_eq!(x3, previous_domain.element(2 * previous_beta));
 
             let y1 = previous_poly.evaluate(&x1);
             let y2 = previous_poly.evaluate(&x2);
             let y3 = round.poly.evaluate(&x3);
-
-            // FIXME: solve linearity test
-            // let line = round.interpolate(&[y1, y2, y3]);
-            // assert_eq!(line.len(), 2);
 
             points.push([(x1, y1), (x2, y2), (x3, y3)]);
 
@@ -117,7 +115,7 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             previous_poly = &round.poly;
             previous_commit = &round.commit;
             previous_domain = &round.domain;
-            previous_beta *= previous_beta;
+            previous_beta %= previous_domain.size();
             println!("another round achieved");
         }
 
@@ -134,8 +132,8 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
         }
         assert_eq!(commitments.len(), proof.points.len());
 
-        let beta = self.beta.unwrap();
-        let alpha = self.alpha.unwrap();
+        let mut beta = self.beta.unwrap();
+        let alpha = F::from(self.alpha.unwrap() as u64);
 
         let mut index = 0usize;
         for ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2, path3]) in
@@ -149,10 +147,14 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             assert_eq!(poly.evaluate(&x1), F::ZERO);
             assert_eq!(poly.evaluate(&x2), F::ZERO);
 
-            // FIXME: add linearity test
-            // assess folding was done correctly
-            // assert!(poly.degree() == 1)
+            // linearity_check
+            let two_inv = F::from(2).inverse().unwrap();
+            let x1_inv = x1.inverse().unwrap();
+            let even_part = (y1 + y2) * two_inv;
+            let odd_part = (y1 - y2) * two_inv * x1_inv;
+            assert_eq!(y3, even_part + alpha * odd_part);
 
+            // opening checking
             commitments[index].check_proof(path1);
             commitments[index].check_proof(path2);
             commitments[index].check_proof(path3);
@@ -214,10 +216,6 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
             )]))
     }
 
-    fn interpolate(&self, evals: &[F]) -> Vec<F> {
-        self.domain.ifft(evals)
-    }
-
     fn codeword_commit(
         poly: &DensePolynomial<F>,
         domain: Radix2EvaluationDomain<F>,
@@ -252,24 +250,5 @@ mod test {
         assert!(proof_result.is_ok());
         let proof = proof_result.unwrap();
         assert!(fri.verify(commitment, proof));
-    }
-
-    #[test]
-    fn test_linearity_test() {
-        let coeffs = vec![
-            Goldilocks::rand(&mut test_rng()),
-            Goldilocks::rand(&mut test_rng()),
-            Goldilocks::ZERO,
-            Goldilocks::ZERO,
-        ];
-        let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let points = (1..7)
-            .map(Goldilocks::from)
-            .map(|i| poly.evaluate(&i))
-            .collect::<Vec<Goldilocks>>();
-
-        let round = FriRound::<Sha256, _>::new(poly, 1, 2, 0);
-        let coeffs = round.interpolate(&points);
-        assert!(coeffs.len() == 2);
     }
 }
