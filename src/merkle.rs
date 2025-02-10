@@ -5,7 +5,6 @@ use std::iter::zip;
 use std::marker::PhantomData;
 
 pub type Hash<D> = GenericArray<u8, <D as OutputSizeUser>::OutputSize>;
-pub struct MerkleRoot<D: Digest>(Hash<D>);
 
 // MerkleTree where all nodes are stored in memory
 pub struct MerkleTree<D: Digest, F> {
@@ -42,29 +41,6 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
 
     pub fn get_leaf_number(&self) -> usize {
         self.leaf_number
-    }
-
-    pub fn check_proof(&self, proof: MerklePath<D, F>) -> bool {
-        if proof.path.len() != proof.path_flag.len() {
-            return false;
-        }
-
-        let mut previous = MerkleTree::<D, _>::hash_leaf(proof.leaf);
-        for (level, flag) in zip(proof.path, proof.path_flag) {
-            let mut hasher = D::new();
-            if flag {
-                hasher.update(level);
-                hasher.update(previous);
-            } else {
-                hasher.update(previous);
-                hasher.update(level);
-            }
-            previous = hasher.finalize();
-        }
-        if previous == self.get_root().0 {
-            return true;
-        }
-        false
     }
 
     pub fn generate_proof(&self, leaf: F) -> Result<MerklePath<D, F>, &str> {
@@ -168,6 +144,33 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
             leaf_number,
             input: PhantomData,
         }
+    }
+}
+
+pub struct MerkleRoot<D: Digest>(Hash<D>);
+
+impl<D: Digest> MerkleRoot<D> {
+    pub fn check_proof<F: PrimeField>(&self, proof: MerklePath<D, F>) -> bool {
+        if proof.path.len() != proof.path_flag.len() {
+            return false;
+        }
+
+        let mut previous = MerkleTree::<D, _>::hash_leaf(proof.leaf);
+        for (level, flag) in zip(proof.path, proof.path_flag) {
+            let mut hasher = D::new();
+            if flag {
+                hasher.update(level);
+                hasher.update(previous);
+            } else {
+                hasher.update(previous);
+                hasher.update(level);
+            }
+            previous = hasher.finalize();
+        }
+        if previous == self.0 {
+            return true;
+        }
+        false
     }
 }
 
@@ -291,7 +294,8 @@ mod test {
         ];
         assert_eq!(proof.path, path_raw);
 
-        let check = tree.check_proof(proof);
+        let root = tree.get_root();
+        let check = root.check_proof(proof);
         assert!(check);
     }
 }
