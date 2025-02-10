@@ -21,7 +21,7 @@ struct Fri<D: Digest, F: PrimeField> {
 
 struct FriProof<D: Digest, F: PrimeField> {
     points: Vec<[(F, F); 3]>,
-    queries: Vec<[MerklePath<D, F>; 2]>,
+    queries: Vec<[MerklePath<D, F>; 3]>,
     quotients: Vec<DensePolynomial<F>>,
 }
 
@@ -84,26 +84,23 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
 
             let x1 = previous_domain.element(previous_beta);
             let x2 = previous_domain.element(round.domain.size() + previous_beta);
-            let x3 = self.domain.element(previous_beta * previous_beta);
+            let x3 = round.domain.element(previous_beta);
 
             let y1 = previous_poly.evaluate(&x1);
             let y2 = previous_poly.evaluate(&x2);
             let y3 = round.poly.evaluate(&x3);
 
-            // folding
-            let z = (y1 + y2) / F::from(2)
-                + F::from(alpha as u64) * (y1 - y2) / F::from(2 * previous_beta as u64);
+            // FIXME: solve linearity test
+            // let line = round.interpolate(&[y1, y2, y3]);
+            // assert_eq!(line.len(), 2);
 
-            // FIXME: fix folding check
-            // assert_eq!(z, y3);
             points.push([(x1, y1), (x2, y2), (x3, y3)]);
 
             // quotienting
             // TODO: find a less manual way in ark-poly
             let a = (y2 - y1) / (x2 - x1);
             let b = y1 - a * x1;
-            let coefficients = vec![b, a];
-            let g = DensePolynomial::from_coefficients_vec(coefficients);
+            let g = DensePolynomial::from_coefficients_vec(vec![a, b]);
             let numerator = previous_poly.clone() - g;
             let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
                 * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
@@ -114,7 +111,8 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             // merkle commits
             let proof1 = previous_commit.generate_proof(y1).unwrap();
             let proof2 = previous_commit.generate_proof(y2).unwrap();
-            queries.push([proof1, proof2]);
+            let proof3 = round.commit.generate_proof(y3).unwrap();
+            queries.push([proof1, proof2, proof3]);
 
             previous_poly = &round.poly;
             previous_commit = &round.commit;
@@ -140,7 +138,9 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
         let alpha = self.alpha.unwrap();
 
         let mut index = 0usize;
-        for ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2]) in zip(proof.points, proof.queries) {
+        for ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2, path3]) in
+            zip(proof.points, proof.queries)
+        {
             let quotient = proof.quotients[index].clone();
             let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
                 * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
@@ -149,13 +149,13 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             assert_eq!(poly.evaluate(&x1), F::ZERO);
             assert_eq!(poly.evaluate(&x2), F::ZERO);
 
+            // FIXME: add linearity test
             // assess folding was done correctly
-            let z = (y1 + y2) / F::from(2)
-                + F::from(alpha as u64) * (y1 - y2) / F::from(2 * beta as u64);
-            // assert_eq!(z, y3);
+            // assert!(poly.degree() == 1)
 
             commitments[index].check_proof(path1);
             commitments[index].check_proof(path2);
+            commitments[index].check_proof(path3);
 
             index += 1;
         }
@@ -214,6 +214,10 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
             )]))
     }
 
+    fn interpolate(&self, evals: &[F]) -> Vec<F> {
+        self.domain.ifft(evals)
+    }
+
     fn codeword_commit(
         poly: &DensePolynomial<F>,
         domain: Radix2EvaluationDomain<F>,
@@ -227,7 +231,8 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
 mod test {
     use super::*;
     use crate::field::Goldilocks;
-    use ark_ff::Field;
+    use ark_ff::{AdditiveGroup, UniformRand};
+    use ark_std::test_rng;
     use sha2::Sha256;
 
     #[test]
@@ -250,33 +255,21 @@ mod test {
     }
 
     #[test]
-    #[ignore]
-    fn test_fri_round() {
-        let blowup_factor = 2usize;
-        let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
-        let poly = DensePolynomial::from_coefficients_slice(&coeffs);
-        // let mut fri = FriRound::<Sha256, _>::new(poly, blowup_factor);
+    fn test_linearity_test() {
+        let coeffs = vec![
+            Goldilocks::rand(&mut test_rng()),
+            Goldilocks::rand(&mut test_rng()),
+            Goldilocks::ZERO,
+            Goldilocks::ZERO,
+        ];
+        let poly = DensePolynomial::from_coefficients_vec(coeffs);
+        let points = (1..7)
+            .map(Goldilocks::from)
+            .map(|i| poly.evaluate(&i))
+            .collect::<Vec<Goldilocks>>();
 
-        let alpha = 1usize;
-        let beta = 1usize;
-        // fri.split_and_fold(alpha);
-        // let (merkle_proofs, consistency_proofs) = fri.prove(beta).unwrap();
-        // assert!(fri.verify(merkle_proofs, consistency_proofs));
-    }
-
-    #[test]
-    #[ignore]
-    fn test_quotienting() {
-        let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
-        let poly = DensePolynomial::from_coefficients_slice(&coeffs);
-        let domain = Radix2EvaluationDomain::<Goldilocks>::new(coeffs.len()).unwrap();
-
-        let x = Goldilocks::from(57);
-        let y = poly.evaluate(&x);
-        let vanishing_poly = DensePolynomial::from_coefficients_slice(&[-x, Goldilocks::ONE]);
-        let f_minus_y = poly.clone() - DensePolynomial::from_coefficients_slice(&[y]);
-        let w = f_minus_y.clone() / vanishing_poly.clone();
-
-        assert_eq!(w * vanishing_poly, f_minus_y);
+        let round = FriRound::<Sha256, _>::new(poly, 1, 2, 0);
+        let coeffs = round.interpolate(&points);
+        assert!(coeffs.len() == 2);
     }
 }
