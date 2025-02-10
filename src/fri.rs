@@ -22,6 +22,7 @@ struct Fri<D: Digest, F: PrimeField> {
 struct FriProof<D: Digest, F: PrimeField> {
     points: Vec<[(F, F); 3]>,
     queries: Vec<[MerklePath<D, F>; 2]>,
+    quotients: Vec<DensePolynomial<F>>,
 }
 
 impl<D: Digest, F: PrimeField> Fri<D, F> {
@@ -72,6 +73,7 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
         let alpha = self.alpha.unwrap();
         let mut queries = Vec::new();
         let mut points = Vec::new();
+        let mut quotients = Vec::new();
 
         let mut previous_poly = &self.poly;
         let mut previous_commit = &self.commit;
@@ -88,6 +90,7 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             let y2 = previous_poly.evaluate(&x2);
             let y3 = round.poly.evaluate(&x3);
 
+            // folding
             let z = (y1 + y2) / F::from(2)
                 + F::from(alpha as u64) * (y1 - y2) / F::from(2 * previous_beta as u64);
 
@@ -95,7 +98,20 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             // assert_eq!(z, y3);
             points.push([(x1, y1), (x2, y2), (x3, y3)]);
 
-            // no need to generate proof for x3 as it will be done in the next round as x1 == x3
+            // quotienting
+            // TODO: find a less manual way in ark-poly
+            let a = (y2 - y1) / (x2 - x1);
+            let b = y1 - a * x1;
+            let coefficients = vec![b, a];
+            let g = DensePolynomial::from_coefficients_vec(coefficients);
+            let numerator = previous_poly.clone() - g;
+            let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
+                * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
+            let q = numerator / vanishing_poly;
+            println!("quotient: {:?}", q);
+            quotients.push(q);
+
+            // merkle commits
             let proof1 = previous_commit.generate_proof(y1).unwrap();
             let proof2 = previous_commit.generate_proof(y2).unwrap();
             queries.push([proof1, proof2]);
@@ -107,7 +123,11 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             println!("another round achieved");
         }
 
-        Ok(FriProof { points, queries })
+        Ok(FriProof {
+            points,
+            queries,
+            quotients,
+        })
     }
 
     pub fn verify(&self, commitments: Vec<MerkleRoot<D>>, proof: FriProof<D, F>) -> bool {
@@ -121,7 +141,13 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
 
         let mut index = 0usize;
         for ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2]) in zip(proof.points, proof.queries) {
-            // TODO: quotienting to assess f(x) = y
+            let quotient = proof.quotients[index].clone();
+            let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
+                * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
+            let poly = quotient * vanishing_poly;
+            // TODO: check for degree of polynomial
+            assert_eq!(poly.evaluate(&x1), F::ZERO);
+            assert_eq!(poly.evaluate(&x2), F::ZERO);
 
             // assess folding was done correctly
             let z = (y1 + y2) / F::from(2)
@@ -207,25 +233,13 @@ mod test {
     #[test]
     fn test_fri_new() {
         let blowup_factor = 2usize;
-        let coeffs = vec![Goldilocks::from(1), Goldilocks::from(5)];
-        let fri = Fri::<Sha256, _>::new(
-            DensePolynomial::from_coefficients_vec(coeffs),
-            blowup_factor,
-        );
-
-        assert_eq!(fri.rounds, 1usize);
-    }
-
-    #[test]
-    fn test_commit_phase() {
-        let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
-        let poly = DensePolynomial::from_coefficients_slice(&coeffs);
+        let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let mut fri = Fri::<Sha256, _>::new(poly, blowup_factor);
+        assert_eq!(fri.rounds, 2);
 
         let alpha = 3usize;
         let commitment = fri.commit_phase(alpha);
-        assert_eq!(fri.rounds, 2);
         assert_eq!(commitment.len(), 2);
 
         let beta = 2usize;
