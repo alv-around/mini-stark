@@ -1,48 +1,100 @@
+// TODO: improve power of 2 assertion
 use crate::util::is_power_of_two;
 use ark_ff::PrimeField;
 use digest::{generic_array::GenericArray, Digest, OutputSizeUser};
 use std::iter::zip;
-use std::marker::PhantomData;
+
+pub trait Tree<const N: usize> {
+    type Input;
+    type Inner;
+
+    fn new(inputs: &[Self::Input]) -> Self;
+    fn root(&self) -> Self::Inner;
+    // fn get_parent(&self, node: &Self::Inner) -> &Self::Inner;
+    // fn get_children(&self, node: &Self::Inner) -> &[Self::Inner; N];
+    fn calculate_from_external_nodes(children: &[Self::Input]) -> Self::Inner;
+    fn calculate_from_inner_nodes(children: &[Self::Inner]) -> Self::Inner;
+}
 
 pub type Hash<D> = GenericArray<u8, <D as OutputSizeUser>::OutputSize>;
 
-// MerkleTree where all nodes are stored in memory
-pub struct MerkleTree<D: Digest, F> {
-    nodes: Vec<Hash<D>>,
-    leaf_number: usize,
-    input: PhantomData<F>,
+pub struct MerkleTree<const N: usize, D: Digest, F: PrimeField> {
+    external_leafs: Vec<F>,
+    inner_nodes: Vec<Hash<D>>,
+    levels: usize,
 }
 
-pub struct MerklePath<D: Digest, F: PrimeField> {
-    pub leaf: F,
-    path: Vec<Hash<D>>,
-    path_flag: Vec<bool>,
-}
+impl<const N: usize, D: Digest, F: PrimeField> Tree<N> for MerkleTree<N, D, F> {
+    type Input = F;
+    type Inner = Hash<D>;
 
-impl<D: Digest, F: PrimeField> MerklePath<D, F> {
-    fn new(leaf: F, path: Vec<Hash<D>>, path_flag: Vec<bool>) -> Self {
+    fn new(inputs: &[F]) -> Self {
+        let leaf_num = inputs.len();
+        let log2_inputs = leaf_num.trailing_zeros() as usize;
+        let levels = match N {
+            2 => log2_inputs,
+            4 => log2_inputs >> 1,
+            8 => log2_inputs >> 2,
+            16 => log2_inputs >> 3,
+            _ => panic!("MerkleTree not implemented for width: {}", N),
+        };
+        // assert tree is full
+        assert_eq!(
+            levels * N,
+            leaf_num,
+            "Tree is not full! input length must be a power of {N}"
+        );
+
+        let numerator = 1 - (N as i64).pow(levels as u32);
+        let denominator = 1 - N as i64;
+        let node_num = (numerator / denominator) as usize;
+        let mut inner_nodes = Vec::with_capacity(node_num);
+
+        for external in inputs.chunks(N) {
+            let parent = MerkleTree::<N, D, _>::calculate_from_external_nodes(external);
+            inner_nodes.push(parent);
+        }
+
+        let distance = node_num;
+        for i in leaf_num..node_num {
+            let children = &inner_nodes[distance..distance + N];
+            let parent = MerkleTree::<N, D, _>::calculate_from_inner_nodes(children);
+            inner_nodes.push(parent);
+
+            distance -= N - 1;
+        }
+
         Self {
-            leaf,
-            path,
-            path_flag,
+            external_leafs: inputs.to_vec(),
+            inner_nodes,
+            levels,
         }
     }
+
+    fn root(&self) -> Hash<D> {
+        let root = self.inner_nodes.last().unwrap().clone();
+        root
+    }
+
+    fn calculate_from_external_nodes(children: &[F]) -> Hash<D> {
+        let mut hasher = D::new();
+        for child in children {
+            hasher.update(child.to_string());
+        }
+        hasher.finalize()
+    }
+
+    fn calculate_from_inner_nodes(children: &[Hash<D>]) -> Hash<D> {
+        let mut hasher = D::new();
+        for child in children {
+            hasher.update(child)
+        }
+        hasher.finalize()
+    }
 }
 
-impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
-    pub fn get_leafs(&self) -> &[Hash<D>] {
-        &self.nodes[0..self.leaf_number]
-    }
-
-    pub fn get_root(&self) -> MerkleRoot<D> {
-        let capacity = self.nodes.capacity();
-        MerkleRoot(self.nodes[capacity - 1].clone())
-    }
-
-    pub fn get_leaf_number(&self) -> usize {
-        self.leaf_number
-    }
-
+// FIXME: update definition
+impl<const N: usize, F: PrimeField, D: Digest> MerkleTree<N, D, F> {
     pub fn generate_proof(&self, leaf: F) -> Result<MerklePath<D, F>, &str> {
         let node = MerkleTree::<D, _>::hash_leaf(leaf);
         let leaf_index = self.get_leaf_index(&node);
@@ -75,6 +127,7 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     }
 
     fn get_neighbor_idx(&self, index: usize) -> (usize, bool) {
+        // FIXME: Update definition
         let is_uneven = index % 2;
         let flag = match is_uneven {
             0 => false,
@@ -85,15 +138,17 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     }
 
     fn get_parent_idx(&self, index: usize) -> usize {
-        let mut remaining = self.nodes.len() - index;
+        // FIXME: update definition
+        let mut remaining = self..len() - index;
         if remaining % 2 == 1 {
             remaining += 1;
         }
         (remaining >> 1) + index
     }
 
-    fn get_leaf_index(&self, node: &Hash<D>) -> Option<usize> {
-        for (i, value) in self.get_leafs().iter().enumerate() {
+    fn get_leaf_index(&self, node: &F) -> Option<usize> {
+        // FIXME: update definition
+        for (i, value) in self.external_leafs.iter().enumerate() {
             if *node == *value {
                 return Some(i);
             }
@@ -101,48 +156,20 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
 
         None
     }
+}
 
-    pub fn hash_leaf(value: F) -> Hash<D> {
-        D::digest(value.to_string())
-    }
+pub struct MerklePath<D: Digest, F: PrimeField> {
+    pub leaf: F,
+    path: Vec<Hash<D>>,
+    path_flag: Vec<bool>,
+}
 
-    fn hash_children(children: &[Hash<D>]) -> Hash<D> {
-        let mut hasher = D::new();
-        for c in children {
-            hasher.update(c);
-        }
-        hasher.finalize()
-    }
-
-    pub fn generate_tree(leafs: &Vec<F>) -> Self {
-        let leaf_number = leafs.len();
-        assert!(
-            is_power_of_two(leaf_number),
-            "Number of tree leafs must be a power of 2"
-        );
-
-        let capacity = (leaf_number * 2) - 1;
-        let mut nodes = Vec::with_capacity(capacity);
-        for leaf in leafs {
-            let hashed_leaf = MerkleTree::<D, F>::hash_leaf(leaf.clone());
-            nodes.push(hashed_leaf);
-        }
-
-        let mut node_dist = leaf_number;
-        for parent_idx in leaf_number..capacity {
-            let lhs_idx = parent_idx - node_dist;
-            let rhs_idx = lhs_idx + 1;
-            nodes.push(MerkleTree::<D, F>::hash_children(&[
-                nodes[lhs_idx].clone(),
-                nodes[rhs_idx].clone(),
-            ]));
-            node_dist -= 1;
-        }
-
+impl<D: Digest, F: PrimeField> MerklePath<D, F> {
+    fn new(leaf: F, path: Vec<Hash<D>>, path_flag: Vec<bool>) -> Self {
         Self {
-            nodes,
-            leaf_number,
-            input: PhantomData,
+            leaf,
+            path,
+            path_flag,
         }
     }
 }
