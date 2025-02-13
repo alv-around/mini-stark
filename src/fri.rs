@@ -1,4 +1,4 @@
-use super::merkle::{MerklePath, MerkleRoot, MerkleTree};
+use super::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
 use super::util::is_power_of_two;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -8,13 +8,13 @@ use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::Digest;
 use std::iter::zip;
 
-struct Fri<D: Digest, F: PrimeField> {
+struct Fri<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     rounds: usize,
     blowup_factor: usize,
     poly: DensePolynomial<F>,
     domain: Radix2EvaluationDomain<F>,
-    commit: MerkleTree<D, F>,
-    round_state: Vec<FriRound<D, F>>,
+    commit: MerkleTree<TREE_WIDH, D, F>,
+    round_state: Vec<FriRound<TREE_WIDH, D, F>>,
     alpha: Option<usize>,
     beta: Option<usize>,
 }
@@ -25,7 +25,7 @@ struct FriProof<D: Digest, F: PrimeField> {
     quotients: Vec<DensePolynomial<F>>,
 }
 
-impl<D: Digest, F: PrimeField> Fri<D, F> {
+impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
     pub fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
         let d = poly.degree();
         let domain_size = (d + 1) * blowup_factor;
@@ -34,7 +34,7 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
         }
 
         let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
-        let commit = FriRound::<D, F>::codeword_commit(&poly, domain.clone());
+        let commit = FriRound::<W, D, F>::codeword_commit(&poly, domain.clone());
 
         let rounds: usize = (domain_size.trailing_zeros() - 1).try_into().unwrap();
         Self {
@@ -55,10 +55,11 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
         let mut previous_poly = self.poly.clone();
         let mut previous_alpha = self.alpha.unwrap();
         for i in 0..self.rounds {
-            let round = FriRound::<D, _>::new(previous_poly, previous_alpha, self.blowup_factor, i);
+            let round =
+                FriRound::<W, D, _>::new(previous_poly, previous_alpha, self.blowup_factor, i);
             previous_poly = round.poly.clone();
             previous_alpha = round.alpha;
-            oracles.push(round.commit.get_root());
+            oracles.push(MerkleRoot(round.commit.root()));
             self.round_state.push(round);
         }
 
@@ -109,9 +110,9 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             quotients.push(q);
 
             // merkle commits
-            let proof1 = previous_commit.generate_proof(y1).unwrap();
-            let proof2 = previous_commit.generate_proof(y2).unwrap();
-            let proof3 = round.commit.generate_proof(y3).unwrap();
+            let proof1 = previous_commit.generate_proof(&y1).unwrap();
+            let proof2 = previous_commit.generate_proof(&y2).unwrap();
+            let proof3 = round.commit.generate_proof(&y3).unwrap();
             queries.push([proof1, proof2, proof3]);
 
             previous_poly = &round.poly;
@@ -153,9 +154,9 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
             // assess folding was done correctly
             // assert!(poly.degree() == 1)
 
-            commitments[index].check_proof(path1);
-            commitments[index].check_proof(path2);
-            commitments[index].check_proof(path3);
+            commitments[index].check_proof::<W, _>(&y1, path1);
+            commitments[index].check_proof::<W, _>(&y2, path2);
+            commitments[index].check_proof::<W, _>(&y2, path3);
 
             index += 1;
         }
@@ -164,25 +165,25 @@ impl<D: Digest, F: PrimeField> Fri<D, F> {
     }
 }
 
-struct FriRound<D: Digest, F: PrimeField> {
+struct FriRound<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     round: usize,
     alpha: usize,
     poly: DensePolynomial<F>,
-    commit: MerkleTree<D, F>,
+    commit: MerkleTree<TREE_WIDH, D, F>,
     domain: Radix2EvaluationDomain<F>,
 }
 
-impl<D: Digest, F: PrimeField> FriRound<D, F> {
+impl<const W: usize, D: Digest, F: PrimeField> FriRound<W, D, F> {
     fn new(
         previous_poly: DensePolynomial<F>,
         alpha: usize,
         blowup_factor: usize,
         round: usize,
     ) -> Self {
-        let poly = FriRound::<D, F>::split_and_fold(previous_poly, alpha);
+        let poly = FriRound::<W, D, F>::split_and_fold(previous_poly, alpha);
         let domain_size = blowup_factor * (poly.degree() + 1);
         let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
-        let commit = FriRound::<D, F>::codeword_commit(&poly, domain);
+        let commit = FriRound::<W, D, F>::codeword_commit(&poly, domain);
 
         Self {
             round,
@@ -221,9 +222,9 @@ impl<D: Digest, F: PrimeField> FriRound<D, F> {
     fn codeword_commit(
         poly: &DensePolynomial<F>,
         domain: Radix2EvaluationDomain<F>,
-    ) -> MerkleTree<D, F> {
+    ) -> MerkleTree<W, D, F> {
         let leafs = poly.evaluate_over_domain_by_ref(domain);
-        MerkleTree::<D, _>::generate_tree(&leafs.evals)
+        MerkleTree::<W, D, _>::new(&leafs.evals)
     }
 }
 
@@ -235,12 +236,14 @@ mod test {
     use ark_std::test_rng;
     use sha2::Sha256;
 
+    const TWO: usize = 2;
+
     #[test]
     fn test_fri_new() {
         let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let mut fri = Fri::<Sha256, _>::new(poly, blowup_factor);
+        let mut fri = Fri::<TWO, Sha256, _>::new(poly, blowup_factor);
         assert_eq!(fri.rounds, 2);
 
         let alpha = 3usize;
@@ -268,7 +271,7 @@ mod test {
             .map(|i| poly.evaluate(&i))
             .collect::<Vec<Goldilocks>>();
 
-        let round = FriRound::<Sha256, _>::new(poly, 1, 2, 0);
+        let round = FriRound::<TWO, Sha256, _>::new(poly, 1, 2, 0);
         let coeffs = round.interpolate(&points);
         assert!(coeffs.len() == 2);
     }

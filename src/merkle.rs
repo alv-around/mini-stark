@@ -184,7 +184,7 @@ pub struct MerklePath<D: Digest, F: PrimeField> {
     path: Vec<Vec<Hash<D>>>,
 }
 
-pub struct MerkleRoot<D: Digest>(Hash<D>);
+pub struct MerkleRoot<D: Digest>(pub Hash<D>);
 
 impl<D: Digest> MerkleRoot<D> {
     pub fn check_proof<const N: usize, F: PrimeField>(
