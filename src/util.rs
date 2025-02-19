@@ -11,7 +11,7 @@ where
     false
 }
 
-pub fn logarithm_of_two_k<'a, const N: usize>(number: usize) -> Result<usize, &'a str> {
+pub fn logarithm_of_two_k<const N: usize>(number: usize) -> Result<usize, &'static str> {
     assert!(is_power_of_two(N));
     let log_n = N.trailing_zeros() as usize;
 

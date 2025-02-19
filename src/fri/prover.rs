@@ -1,14 +1,14 @@
-use super::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
-use super::util::is_power_of_two;
+use super::FriProof;
+use crate::merkle::{MerkleRoot, MerkleTree, Tree};
+use crate::util::is_power_of_two;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::EvaluationDomain;
 use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::Digest;
-use std::iter::zip;
 
-struct Fri<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
+pub struct Fri<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     rounds: usize,
     blowup_factor: usize,
     poly: DensePolynomial<F>,
@@ -17,12 +17,6 @@ struct Fri<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     round_state: Vec<FriRound<TREE_WIDH, D, F>>,
     alpha: Option<usize>,
     beta: Option<usize>,
-}
-
-struct FriProof<D: Digest, F: PrimeField> {
-    points: Vec<[(F, F); 3]>,
-    queries: Vec<[MerklePath<D, F>; 3]>,
-    quotients: Vec<DensePolynomial<F>>,
 }
 
 impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
@@ -47,6 +41,10 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
             alpha: None,
             beta: None,
         }
+    }
+
+    pub fn generate_commit(&self) -> MerkleRoot<D> {
+        MerkleRoot(self.commit.root())
     }
 
     pub fn commit_phase(&mut self, alpha: usize) -> Vec<MerkleRoot<D>> {
@@ -107,7 +105,7 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
                 * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
             let q = numerator / vanishing_poly;
             println!("quotient: {:?}", q);
-            quotients.push(q);
+            quotients.push(q.to_vec());
 
             // merkle commits
             let proof1 = previous_commit.generate_proof(&y1).unwrap();
@@ -127,41 +125,6 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
             queries,
             quotients,
         })
-    }
-
-    pub fn verify(&self, commitments: Vec<MerkleRoot<D>>, proof: FriProof<D, F>) -> bool {
-        if self.beta.is_none() || self.alpha.is_none() {
-            return false;
-        }
-        assert_eq!(commitments.len(), proof.points.len());
-
-        let beta = self.beta.unwrap();
-        let alpha = self.alpha.unwrap();
-
-        let mut index = 0usize;
-        for ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2, path3]) in
-            zip(proof.points, proof.queries)
-        {
-            let quotient = proof.quotients[index].clone();
-            let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
-                * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
-            let poly = quotient * vanishing_poly;
-            // TODO: check for degree of polynomial
-            assert_eq!(poly.evaluate(&x1), F::ZERO);
-            assert_eq!(poly.evaluate(&x2), F::ZERO);
-
-            // FIXME: add linearity test
-            // assess folding was done correctly
-            // assert!(poly.degree() == 1)
-
-            commitments[index].check_proof::<W, _>(&y1, path1);
-            commitments[index].check_proof::<W, _>(&y2, path2);
-            commitments[index].check_proof::<W, _>(&y2, path3);
-
-            index += 1;
-        }
-
-        true
     }
 }
 
@@ -253,8 +216,6 @@ mod test {
         let beta = 2usize;
         let proof_result = fri.query_phase(beta);
         assert!(proof_result.is_ok());
-        let proof = proof_result.unwrap();
-        assert!(fri.verify(commitment, proof));
     }
 
     #[test]
