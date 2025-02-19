@@ -14,23 +14,23 @@ pub struct FriVerifier<const TREE_WIDTH: usize, D: Digest, F> {
     blowup_factor: usize,
     alpha: usize,
     beta: Option<usize>,
-    commit: MerkleRoot<D>,
-    folded_commits: Vec<MerkleRoot<D>>,
+    commits: Vec<MerkleRoot<D>>,
     field: PhantomData<F>,
 }
 
 impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, D, F> {
     pub fn new(commit: MerkleRoot<D>, degree: usize, blowup_factor: usize) -> Self {
         let domain_size = (degree + 1) * blowup_factor;
-        let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap() - 1;
+        let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap();
         let alpha = rand::rng().random_range(0..domain_size);
+        let mut commits = Vec::with_capacity(rounds);
+        commits.push(commit);
         Self {
             degree,
             blowup_factor,
             alpha,
             beta: None,
-            commit,
-            folded_commits: Vec::with_capacity(rounds),
+            commits,
             field: PhantomData::<F>::default(),
         }
     }
@@ -40,14 +40,16 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
     }
 
     pub fn commitment(&mut self, folding_commitments: Vec<MerkleRoot<D>>) -> Result<usize, String> {
-        if folding_commitments.len() != self.folded_commits.capacity() {
+        if folding_commitments.len() + 1 != self.commits.capacity() {
             return Err(format!(
                 "wrong configuration: rounds don't match {} vs {}",
                 folding_commitments.len(),
-                self.folded_commits.len()
+                self.commits.len()
             ));
         }
-        self.folded_commits = folding_commitments;
+        for commit in folding_commitments {
+            self.commits.push(commit);
+        }
 
         let rnd = rand::rng().random_range(0..(self.degree + 1) * self.blowup_factor);
         self.beta = Some(rnd);
@@ -55,14 +57,9 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
     }
 
     pub fn verify(&self, proof: FriProof<D, F>) -> bool {
-        if self.beta.is_none() {
-            return false;
-        } else if self.folded_commits.len() != proof.points.len() {
+        if self.beta.is_none() || self.commits.len() - 1 != proof.points.len() {
             return false;
         }
-
-        let alpha = self.alpha;
-        let beta = self.beta.unwrap();
 
         let mut index = 0usize;
         for ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2, path3]) in
@@ -81,14 +78,9 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             // assess folding was done correctly
             // assert!(poly.degree() == 1)
 
-            if index == 0 {
-                self.commit.check_proof::<TREE_WIDTH, _>(&y1, path1);
-                self.commit.check_proof::<TREE_WIDTH, _>(&y2, path2);
-            } else {
-                self.folded_commits[index - 1].check_proof::<TREE_WIDTH, _>(&y1, path1);
-                self.folded_commits[index - 1].check_proof::<TREE_WIDTH, _>(&y2, path2);
-            }
-            self.folded_commits[index].check_proof::<TREE_WIDTH, _>(&y3, path3);
+            self.commits[index].check_proof::<TREE_WIDTH, _>(&y1, path1);
+            self.commits[index].check_proof::<TREE_WIDTH, _>(&y2, path2);
+            self.commits[index].check_proof::<TREE_WIDTH, _>(&y3, path3);
 
             index += 1;
         }
@@ -120,6 +112,6 @@ mod test {
         ]);
         let verifier =
             FriVerifier::<TWO, Sha256, Goldilocks>::new(MerkleRoot(hash), degree, blowup_factor);
-        assert_eq!(verifier.folded_commits.capacity(), 2);
+        assert_eq!(verifier.commits.capacity(), 3);
     }
 }

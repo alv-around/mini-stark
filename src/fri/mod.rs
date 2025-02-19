@@ -5,7 +5,7 @@ use crate::merkle::MerklePath;
 use ark_ff::PrimeField;
 use digest::Digest;
 
-struct FriProof<D: Digest, F: PrimeField> {
+pub struct FriProof<D: Digest, F: PrimeField> {
     points: Vec<[(F, F); 3]>,
     queries: Vec<[MerklePath<D, F>; 3]>,
     quotients: Vec<Vec<F>>,
