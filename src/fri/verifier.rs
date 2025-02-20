@@ -12,8 +12,7 @@ use std::iter::zip;
 pub struct FriVerifier<const TREE_WIDTH: usize, D: Digest, F> {
     degree: usize,
     blowup_factor: usize,
-    // FIXME: the should be an alpha for each round
-    alpha: F,
+    alphas: Vec<F>,
     beta: Option<usize>,
     commits: Vec<MerkleRoot<D>>,
 }
@@ -23,20 +22,23 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
         let domain_size = (degree + 1) * blowup_factor;
         let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap();
         // TODO: replace rng
-        let alpha = F::rand(&mut test_rng());
+        let mut alphas = Vec::with_capacity(rounds);
+        for _ in 1..rounds {
+            alphas.push(F::rand(&mut test_rng()));
+        }
         let mut commits = Vec::with_capacity(rounds);
         commits.push(commit);
         Self {
             degree,
             blowup_factor,
-            alpha,
+            alphas,
             beta: None,
             commits,
         }
     }
 
-    pub fn get_alpha(&self) -> F {
-        self.alpha
+    pub fn get_alpha(&self) -> &[F] {
+        &self.alphas
     }
 
     pub fn commitment(&mut self, folding_commitments: Vec<MerkleRoot<D>>) -> Result<usize, String> {
@@ -77,7 +79,7 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             let a = (y2 - y1) / (x2 - x1);
             let b = y1 - a * x1;
             let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
-            assert_eq!(g.evaluate(&self.alpha), y3);
+            assert_eq!(g.evaluate(&self.alphas[i]), y3);
 
             self.commits[i].check_proof::<TREE_WIDTH, _>(&y1, path1);
             self.commits[i].check_proof::<TREE_WIDTH, _>(&y2, path2);

@@ -11,7 +11,6 @@ use digest::Digest;
 pub struct Fri<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     rounds: usize,
     blowup_factor: usize,
-    alpha: Option<F>,
     beta: Option<usize>,
     commits: Vec<FriRound<TREE_WIDH, D, F>>,
 }
@@ -32,7 +31,6 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
         Self {
             rounds,
             blowup_factor,
-            alpha: None,
             beta: None,
             commits,
         }
@@ -46,15 +44,15 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
         self.blowup_factor * (poly.degree() + 1)
     }
 
-    pub fn commit_phase(&mut self, alpha: F) -> Vec<MerkleRoot<D>> {
-        self.alpha = Some(alpha);
+    pub fn commit_phase(&mut self, alphas: &[F]) -> Vec<MerkleRoot<D>> {
+        assert_eq!(alphas.len(), self.rounds - 1);
         let mut oracles = Vec::new();
 
-        for i in 1..self.rounds {
-            let previous_round = &self.commits[i - 1];
+        for (i, _) in (1..self.rounds).enumerate() {
+            let previous_round = &self.commits[i];
             let previous_poly = previous_round.poly.clone();
             // FIXME: alpha should be different in each round
-            let alpha = self.alpha.unwrap();
+            let alpha = alphas[i];
             let folded_poly = FriRound::<W, D, _>::split_and_fold(&previous_poly, alpha);
             let domain_size = self.domain_size(&folded_poly);
 
@@ -67,7 +65,7 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
     }
 
     pub fn query_phase(&mut self, beta: usize) -> Result<FriProof<D, F>, &str> {
-        if self.alpha.is_none() || self.beta.is_some() {
+        if self.commits.len() < self.rounds || self.beta.is_some() {
             return Err("wrong time");
         }
         self.beta = Some(beta);
@@ -93,14 +91,13 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
             points.push([(x1, y1), (x2, y2), (x3, y3)]);
             assert_eq!(x3, previous_domain.element(2 * previous_beta));
 
-            // linearity test
+            // quotienting
             // g(x) = ax + b
             let a = (y2 - y1) / (x2 - x1);
             let b = y1 - a * x1;
             let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
-            assert_eq!(g.evaluate(&self.alpha.unwrap()), y3);
 
-            // quotienting
+            // q(x) = f(x) - g(x) / Z(x)
             let numerator = previous_poly.clone() - g;
             let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
                 * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
@@ -197,8 +194,11 @@ mod test {
         let mut fri = Fri::<TWO, Sha256, _>::new(poly, blowup_factor);
         assert_eq!(fri.rounds, 3);
 
-        let alpha = Goldilocks::rand(&mut test_rng());
-        let commitment = fri.commit_phase(alpha);
+        let mut alphas = Vec::new();
+        for _ in 1..fri.rounds {
+            alphas.push(Goldilocks::rand(&mut test_rng()));
+        }
+        let commitment = fri.commit_phase(&alphas);
         assert_eq!(commitment.len(), 2);
 
         let beta = 2usize;
