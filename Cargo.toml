@@ -1,5 +1,5 @@
 [package]
-name = "starks"
+name = "mini-starks"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,6 +11,7 @@ ark-std = "0.5.0"
 itertools = "0.14.0"
 trpl = "0.2.0"
 digest = "0.10.7"
+rand = "0.9.0"
 
 [dev-dependencies]
 ark-test-curves = { version = "0.5.0", features = ["bls12_381_curve"] }
