@@ -1,6 +1,6 @@
 use super::FriProof;
 use crate::merkle::{MerkleRoot, MerkleTree, Tree};
-use crate::util::is_power_of_two;
+use crate::util::logarithm_of_two_k;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
@@ -11,54 +11,56 @@ use digest::Digest;
 pub struct Fri<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     rounds: usize,
     blowup_factor: usize,
-    poly: DensePolynomial<F>,
-    domain: Radix2EvaluationDomain<F>,
-    commit: MerkleTree<TREE_WIDH, D, F>,
-    round_state: Vec<FriRound<TREE_WIDH, D, F>>,
-    alpha: Option<usize>,
+    alpha: Option<F>,
     beta: Option<usize>,
+    commits: Vec<FriRound<TREE_WIDH, D, F>>,
 }
 
 impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
     pub fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
         let d = poly.degree();
         let domain_size = (d + 1) * blowup_factor;
-        if !is_power_of_two(domain_size) {
+        let rounds = logarithm_of_two_k::<W>(domain_size);
+        if rounds.is_err() {
             panic!("blowup factor and degree of polynomial must be a power of 2");
         }
+        let rounds = rounds.unwrap();
+        let mut commits = Vec::<FriRound<W, D, F>>::with_capacity(rounds);
+        let first_round = FriRound::new(poly, domain_size);
+        commits.push(first_round);
 
-        let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
-        let commit = FriRound::<W, D, F>::codeword_commit(&poly, domain.clone());
-
-        let rounds: usize = (domain_size.trailing_zeros() - 1).try_into().unwrap();
         Self {
             rounds,
             blowup_factor,
-            poly,
-            round_state: Vec::new(),
-            commit,
-            domain,
             alpha: None,
             beta: None,
+            commits,
         }
     }
 
     pub fn generate_commit(&self) -> MerkleRoot<D> {
-        MerkleRoot(self.commit.root())
+        MerkleRoot(self.commits[0].commit.root())
     }
 
-    pub fn commit_phase(&mut self, alpha: usize) -> Vec<MerkleRoot<D>> {
+    fn domain_size(&self, poly: &DensePolynomial<F>) -> usize {
+        self.blowup_factor * (poly.degree() + 1)
+    }
+
+    pub fn commit_phase(&mut self, alpha: F) -> Vec<MerkleRoot<D>> {
         self.alpha = Some(alpha);
         let mut oracles = Vec::new();
-        let mut previous_poly = self.poly.clone();
-        let mut previous_alpha = self.alpha.unwrap();
-        for i in 0..self.rounds {
-            let round =
-                FriRound::<W, D, _>::new(previous_poly, previous_alpha, self.blowup_factor, i);
-            previous_poly = round.poly.clone();
-            previous_alpha = round.alpha;
+
+        for i in 1..self.rounds {
+            let previous_round = &self.commits[i - 1];
+            let previous_poly = previous_round.poly.clone();
+            // FIXME: alpha should be different in each round
+            let alpha = self.alpha.unwrap();
+            let folded_poly = FriRound::<W, D, _>::split_and_fold(&previous_poly, alpha);
+            let domain_size = self.domain_size(&folded_poly);
+
+            let round = FriRound::<W, D, _>::new(folded_poly, domain_size);
             oracles.push(MerkleRoot(round.commit.root()));
-            self.round_state.push(round);
+            self.commits.push(round);
         }
 
         oracles
@@ -69,37 +71,36 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
             return Err("wrong time");
         }
         self.beta = Some(beta);
-        let alpha = self.alpha.unwrap();
         let mut queries = Vec::new();
         let mut points = Vec::new();
         let mut quotients = Vec::new();
 
-        let mut previous_poly = &self.poly;
-        let mut previous_commit = &self.commit;
-        let mut previous_domain = &self.domain;
+        let mut rounds_iter = self.commits.iter_mut();
+        let previous_round = rounds_iter.next().unwrap();
+        let mut previous_poly = &previous_round.poly;
+        let mut previous_commit = &previous_round.commit;
+        let mut previous_domain = &previous_round.domain;
         let mut previous_beta = beta;
-        for round in self.round_state.iter() {
-            assert_eq!(previous_domain.size() >> 1, round.domain.size());
+        for round in rounds_iter {
+            assert_eq!(previous_domain.size() / W, round.domain.size());
 
             let x1 = previous_domain.element(previous_beta);
             let x2 = previous_domain.element(round.domain.size() + previous_beta);
             let x3 = round.domain.element(previous_beta);
-
             let y1 = previous_poly.evaluate(&x1);
             let y2 = previous_poly.evaluate(&x2);
             let y3 = round.poly.evaluate(&x3);
-
-            // FIXME: solve linearity test
-            // let line = round.interpolate(&[y1, y2, y3]);
-            // assert_eq!(line.len(), 2);
-
             points.push([(x1, y1), (x2, y2), (x3, y3)]);
+            assert_eq!(x3, previous_domain.element(2 * previous_beta));
 
-            // quotienting
-            // TODO: find a less manual way in ark-poly
+            // linearity test
+            // g(x) = ax + b
             let a = (y2 - y1) / (x2 - x1);
             let b = y1 - a * x1;
-            let g = DensePolynomial::from_coefficients_vec(vec![a, b]);
+            let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
+            assert_eq!(g.evaluate(&self.alpha.unwrap()), y3);
+
+            // quotienting
             let numerator = previous_poly.clone() - g;
             let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
                 * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
@@ -129,57 +130,44 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
 }
 
 struct FriRound<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
-    round: usize,
-    alpha: usize,
     poly: DensePolynomial<F>,
     commit: MerkleTree<TREE_WIDH, D, F>,
     domain: Radix2EvaluationDomain<F>,
 }
 
 impl<const W: usize, D: Digest, F: PrimeField> FriRound<W, D, F> {
-    fn new(
-        previous_poly: DensePolynomial<F>,
-        alpha: usize,
-        blowup_factor: usize,
-        round: usize,
-    ) -> Self {
-        let poly = FriRound::<W, D, F>::split_and_fold(previous_poly, alpha);
-        let domain_size = blowup_factor * (poly.degree() + 1);
+    fn new(poly: DensePolynomial<F>, domain_size: usize) -> Self {
         let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
         let commit = FriRound::<W, D, F>::codeword_commit(&poly, domain);
 
         Self {
-            round,
-            alpha,
             commit,
             poly,
             domain,
         }
     }
 
-    fn split_and_fold(poly: DensePolynomial<F>, alpha: usize) -> DensePolynomial<F> {
-        let (mut even, mut odd) = (Vec::<F>::new(), Vec::<F>::new());
+    fn split_and_fold(poly: &DensePolynomial<F>, alpha: F) -> DensePolynomial<F> {
+        let mut coeffs_vectors = Vec::<Vec<F>>::new();
+        for _ in 0..W {
+            coeffs_vectors.push(Vec::<F>::new());
+        }
         for (i, element) in poly.coeffs().iter().enumerate() {
-            if i % 2 == 0 {
-                even.push(*element);
-            } else {
-                odd.push(*element);
-            }
+            let index = i % W;
+            coeffs_vectors[index].push(*element);
         }
 
-        let (even_poly, odd_poly) = (
-            DensePolynomial::from_coefficients_vec(even),
-            DensePolynomial::from_coefficients_vec(odd),
-        );
-
-        even_poly
-            + odd_poly.naive_mul(&DensePolynomial::from_coefficients_slice(&[F::from(
-                alpha as u64,
-            )]))
-    }
-
-    fn interpolate(&self, evals: &[F]) -> Vec<F> {
-        self.domain.ifft(evals)
+        coeffs_vectors
+            .iter()
+            .map(|coeffs: &Vec<F>| DensePolynomial::from_coefficients_slice(coeffs))
+            .enumerate()
+            .map(|(i, poly)| {
+                poly.naive_mul(&DensePolynomial::from_coefficients_slice(&[
+                    alpha.pow([i as u64])
+                ]))
+            })
+            .reduce(|acc, e| acc + e)
+            .unwrap()
     }
 
     fn codeword_commit(
@@ -195,7 +183,7 @@ impl<const W: usize, D: Digest, F: PrimeField> FriRound<W, D, F> {
 mod test {
     use super::*;
     use crate::field::Goldilocks;
-    use ark_ff::{AdditiveGroup, UniformRand};
+    use ark_ff::UniformRand;
     use ark_std::test_rng;
     use sha2::Sha256;
 
@@ -207,33 +195,14 @@ mod test {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let mut fri = Fri::<TWO, Sha256, _>::new(poly, blowup_factor);
-        assert_eq!(fri.rounds, 2);
+        assert_eq!(fri.rounds, 3);
 
-        let alpha = 3usize;
+        let alpha = Goldilocks::rand(&mut test_rng());
         let commitment = fri.commit_phase(alpha);
         assert_eq!(commitment.len(), 2);
 
         let beta = 2usize;
         let proof_result = fri.query_phase(beta);
         assert!(proof_result.is_ok());
-    }
-
-    #[test]
-    fn test_linearity_test() {
-        let coeffs = vec![
-            Goldilocks::rand(&mut test_rng()),
-            Goldilocks::rand(&mut test_rng()),
-            Goldilocks::ZERO,
-            Goldilocks::ZERO,
-        ];
-        let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let points = (1..7)
-            .map(Goldilocks::from)
-            .map(|i| poly.evaluate(&i))
-            .collect::<Vec<Goldilocks>>();
-
-        let round = FriRound::<TWO, Sha256, _>::new(poly, 1, 2, 0);
-        let coeffs = round.interpolate(&points);
-        assert!(coeffs.len() == 2);
     }
 }

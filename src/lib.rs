@@ -1,4 +1,4 @@
-mod field;
-mod fri;
+pub mod field;
+pub mod fri;
 mod merkle;
 mod util;

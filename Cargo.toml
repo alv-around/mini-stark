@@ -1,5 +1,5 @@
 [package]
-name = "starks"
+name = "mini-starks"
 version = "0.1.0"
 edition = "2021"
 

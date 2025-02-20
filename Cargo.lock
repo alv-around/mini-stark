@@ -1023,6 +1023,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "mini-starks"
+version = "0.1.0"
+dependencies = [
+ "ark-ff",
+ "ark-poly",
+ "ark-std",
+ "ark-test-curves",
+ "digest",
+ "itertools 0.14.0",
+ "num-traits",
+ "rand 0.9.0",
+ "sha2",
+ "trpl",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1718,22 +1734,6 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
-
-[[package]]
-name = "starks"
-version = "0.1.0"
-dependencies = [
- "ark-ff",
- "ark-poly",
- "ark-std",
- "ark-test-curves",
- "digest",
- "itertools 0.14.0",
- "num-traits",
- "rand 0.9.0",
- "sha2",
- "trpl",
-]
 
 [[package]]
 name = "string_cache"
