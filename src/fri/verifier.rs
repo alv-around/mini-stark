@@ -76,12 +76,14 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             assert_eq!(x1.pow([2]), x3);
 
             let quotient = DensePolynomial::from_coefficients_vec(proof.quotients[i].clone());
+            assert_eq!(
+                quotient.degree(),
+                self.degree / TREE_WIDTH.pow((i + 1) as u32)
+            );
             let vanishing_poly = self.calculate_vanishing_poly(&[x1, x2, x3]);
             let poly = quotient * vanishing_poly;
             assert_eq!(poly.evaluate(&x1), F::ZERO);
             assert_eq!(poly.evaluate(&x2), F::ZERO);
-            // FIXME: degree test
-            // assert_eq!(poly.degree(), self.degree / (TREE_WIDTH ^ (i + 1)));
 
             // linearity test
             let a = (y2 - y1) / (x2 - x1);
