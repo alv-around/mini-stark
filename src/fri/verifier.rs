@@ -2,8 +2,9 @@ use super::FriProof;
 use crate::merkle::MerkleRoot;
 use crate::util::logarithm_of_two_k;
 use ark_ff::PrimeField;
+use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
-use ark_poly::{DenseUVPolynomial, Polynomial};
+use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial};
 use ark_std::test_rng;
 use digest::Digest;
 use rand::Rng;
@@ -63,12 +64,19 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             return false;
         }
 
-        for (i, ([(x1, y1), (x2, y2), (_x3, y3)], [path1, path2, path3])) in
+        let domain_size = (self.degree + 1) * self.blowup_factor;
+        let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
+        let mut prev_x3 = domain.element(self.beta.unwrap());
+        for (i, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2, path3])) in
             zip(proof.points, proof.queries).enumerate()
         {
+            println!("Round {}", i);
+            assert_eq!(x1, prev_x3);
+            assert_eq!(-x1, x2);
+            assert_eq!(x1.pow([2]), x3);
+
             let quotient = DensePolynomial::from_coefficients_vec(proof.quotients[i].clone());
-            let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
-                * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
+            let vanishing_poly = self.calculate_vanishing_poly(&[x1, x2, x3]);
             let poly = quotient * vanishing_poly;
             assert_eq!(poly.evaluate(&x1), F::ZERO);
             assert_eq!(poly.evaluate(&x2), F::ZERO);
@@ -84,9 +92,19 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             self.commits[i].check_proof::<TREE_WIDTH, _>(&y1, path1);
             self.commits[i].check_proof::<TREE_WIDTH, _>(&y2, path2);
             self.commits[i].check_proof::<TREE_WIDTH, _>(&y3, path3);
+
+            prev_x3 = x3;
         }
 
         true
+    }
+
+    fn calculate_vanishing_poly(&self, roots: &[F]) -> DensePolynomial<F> {
+        roots
+            .iter()
+            .map(|i| DensePolynomial::from_coefficients_slice(&[-*i, F::ONE]))
+            .reduce(|acc, e| acc * e)
+            .unwrap()
     }
 }
 

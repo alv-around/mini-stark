@@ -99,8 +99,7 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
 
             // q(x) = f(x) - g(x) / Z(x)
             let numerator = previous_poly.clone() - g;
-            let vanishing_poly = DensePolynomial::from_coefficients_vec(vec![-x1, F::ONE])
-                * DensePolynomial::from_coefficients_vec(vec![-x2, F::ONE]);
+            let vanishing_poly = Fri::<W, D, F>::calculate_vanishing_poly(&[x1, x2]);
             let q = numerator / vanishing_poly;
             println!("quotient: {:?}", q);
             quotients.push(q.to_vec());
@@ -114,7 +113,7 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
             previous_poly = &round.poly;
             previous_commit = &round.commit;
             previous_domain = &round.domain;
-            previous_beta *= previous_beta;
+            previous_beta %= round.domain.size();
             println!("another round achieved");
         }
 
@@ -123,6 +122,14 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
             queries,
             quotients,
         })
+    }
+
+    fn calculate_vanishing_poly(roots: &[F]) -> DensePolynomial<F> {
+        roots
+            .iter()
+            .map(|i| DensePolynomial::from_coefficients_slice(&[-*i, F::ONE]))
+            .reduce(|acc, e| acc * e)
+            .unwrap()
     }
 }
 

@@ -163,7 +163,7 @@ impl<const N: usize, F: PrimeField, D: Digest> MerkleTree<N, D, F> {
     }
 
     pub fn generate_proof(&self, leaf: &F) -> Result<MerklePath<D, F>, &str> {
-        let leaf_index = self.get_leaf_index(&leaf);
+        let leaf_index = self.get_leaf_index(leaf);
         if leaf_index.is_none() {
             return Err("leaf is not included in the tree");
         }
