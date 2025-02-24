@@ -13,6 +13,7 @@ use std::iter::zip;
 pub struct FriVerifier<const TREE_WIDTH: usize, D: Digest, F> {
     degree: usize,
     blowup_factor: usize,
+    rounds: usize,
     alphas: Vec<F>,
     beta: Option<usize>,
     commits: Vec<MerkleRoot<D>>,
@@ -31,6 +32,7 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
         commits.push(commit);
         Self {
             degree,
+            rounds,
             blowup_factor,
             alphas,
             beta: None,
@@ -76,11 +78,9 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             assert_eq!(x1.pow([2]), x3);
 
             let quotient = DensePolynomial::from_coefficients_vec(proof.quotients[i].clone());
-            assert_eq!(
-                quotient.degree(),
-                self.degree / TREE_WIDTH.pow((i + 1) as u32)
-            );
             let vanishing_poly = self.calculate_vanishing_poly(&[x1, x2, x3]);
+            let total_degree = quotient.degree() + vanishing_poly.degree();
+            assert!(total_degree <= 1 << (self.rounds - i));
             let poly = quotient * vanishing_poly;
             assert_eq!(poly.evaluate(&x1), F::ZERO);
             assert_eq!(poly.evaluate(&x2), F::ZERO);
