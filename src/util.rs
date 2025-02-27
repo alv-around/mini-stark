@@ -25,6 +25,19 @@ pub fn logarithm_of_two_k<const N: usize>(number: usize) -> Result<usize, &'stat
     Ok(power_of_two / log_n)
 }
 
+pub fn ceil_log2_k<const N: usize>(number: usize) -> usize {
+    assert!(is_power_of_two(N));
+    assert!(number != 0);
+    let log2_base = N.trailing_zeros() as usize;
+    let log2_number = number.trailing_zeros() as usize;
+    if is_power_of_two(number) && log2_number % log2_base == 0 {
+        log2_number
+    } else {
+        let next_power_2 = usize::BITS - number.leading_zeros();
+        next_power_2.div_ceil(log2_base as u32) as usize * log2_base
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -67,5 +80,18 @@ mod test {
         assert_eq!(Ok(2), logarithm_of_two_k::<SIXTEEN>(256));
         assert_eq!(not_power_of_2, logarithm_of_two_k::<SIXTEEN>(48));
         assert_eq!(not_power_of_2k, logarithm_of_two_k::<SIXTEEN>(64));
+    }
+
+    #[test]
+    fn test_ceil_log_power_two() {
+        assert_eq!(1, ceil_log2_k::<TWO>(1));
+        assert_eq!(1, ceil_log2_k::<TWO>(2));
+        assert_eq!(5, ceil_log2_k::<TWO>(21));
+        assert_eq!(5, ceil_log2_k::<TWO>(32));
+
+        assert_eq!(2, ceil_log2_k::<FOUR>(4));
+        assert_eq!(2, ceil_log2_k::<FOUR>(3));
+        assert_eq!(4, ceil_log2_k::<FOUR>(13));
+        assert_eq!(6, ceil_log2_k::<FOUR>(21));
     }
 }

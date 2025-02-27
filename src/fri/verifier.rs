@@ -1,6 +1,6 @@
 use super::FriProof;
 use crate::merkle::MerkleRoot;
-use crate::util::logarithm_of_two_k;
+use crate::util::{ceil_log2_k, logarithm_of_two_k};
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
@@ -12,6 +12,7 @@ use std::iter::zip;
 
 pub struct FriVerifier<const TREE_WIDTH: usize, D: Digest, F> {
     degree: usize,
+    domain_size: usize,
     blowup_factor: usize,
     rounds: usize,
     alphas: Vec<F>,
@@ -21,18 +22,19 @@ pub struct FriVerifier<const TREE_WIDTH: usize, D: Digest, F> {
 
 impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, D, F> {
     pub fn new(commit: MerkleRoot<D>, degree: usize, blowup_factor: usize) -> Self {
-        let domain_size = (degree + 1) * blowup_factor;
+        let domain_size = 1 << ceil_log2_k::<TREE_WIDTH>((degree + 1) * blowup_factor);
         let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap();
         // TODO: replace rng
         let mut alphas = Vec::with_capacity(rounds);
         for _ in 1..rounds {
-            alphas.push(F::rand(&mut test_rng()));
+            alphas.push(FriVerifier::<TREE_WIDTH, D, F>::draw_random_scalar());
         }
         let mut commits = Vec::with_capacity(rounds);
         commits.push(commit);
         Self {
             degree,
             rounds,
+            domain_size,
             blowup_factor,
             alphas,
             beta: None,
@@ -66,8 +68,7 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             return false;
         }
 
-        let domain_size = (self.degree + 1) * self.blowup_factor;
-        let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
+        let domain = Radix2EvaluationDomain::<F>::new(self.domain_size).unwrap();
         let mut prev_x3 = domain.element(self.beta.unwrap());
         for (i, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2, path3])) in
             zip(proof.points, proof.queries).enumerate()
@@ -80,10 +81,10 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
             let quotient = DensePolynomial::from_coefficients_vec(proof.quotients[i].clone());
             let vanishing_poly = self.calculate_vanishing_poly(&[x1, x2, x3]);
             let total_degree = quotient.degree() + vanishing_poly.degree();
+            assert!(total_degree >= 2);
             assert!(total_degree <= 1 << (self.rounds - i));
-            let poly = quotient * vanishing_poly;
-            assert_eq!(poly.evaluate(&x1), F::ZERO);
-            assert_eq!(poly.evaluate(&x2), F::ZERO);
+            // FIXME: find a better solution to divide by vanishing poly
+            let _ = quotient / vanishing_poly;
 
             // linearity test
             let a = (y2 - y1) / (x2 - x1);
@@ -99,6 +100,10 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
         }
 
         true
+    }
+
+    pub fn draw_random_scalar() -> F {
+        F::rand(&mut test_rng())
     }
 
     fn calculate_vanishing_poly(&self, roots: &[F]) -> DensePolynomial<F> {
