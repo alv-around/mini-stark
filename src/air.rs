@@ -12,7 +12,7 @@ pub trait Provable<T, F: PrimeField> {
 }
 
 pub trait Verifiable<F: PrimeField> {
-    fn constrains(&self, trace: &TraceTable<F>) -> Vec<DensePolynomial<F>>;
+    fn constrains(&self, trace: &TraceTable<F>) -> Constrains<F>;
 }
 
 pub struct TraceTable<F: PrimeField> {
@@ -73,8 +73,8 @@ impl<F: PrimeField> Constrains<F> {
         self.trace_polys[col].clone()
     }
 
-    pub fn get_omega(&self) -> F {
-        self.domain.element(1)
+    pub fn get_domain(&self) -> Radix2EvaluationDomain<F> {
+        self.domain
     }
 
     pub fn constrains(self) -> Vec<DensePolynomial<F>> {
@@ -85,8 +85,8 @@ impl<F: PrimeField> Constrains<F> {
         let omega_i = self.domain.element(row);
         let root = DensePolynomial::from_coefficients_vec(vec![-omega_i, F::ONE]);
         let y = DensePolynomial::from_coefficients_slice(&[value]);
-        self.constrains
-            .push((self.trace_polys[col].clone() - y) / root);
+        let poly = (self.trace_polys[col].clone() - y) / root;
+        self.constrains.push(poly);
     }
 
     pub fn add_transition_constrain(&mut self, poly: DensePolynomial<F>) {
@@ -122,7 +122,8 @@ impl<F: PrimeField> Constrains<F> {
 mod test {
     use super::*;
     use crate::field::Goldilocks;
-    use ark_ff::Field;
+    use ark_ff::{AdditiveGroup, Field};
+    use ark_poly::Polynomial;
 
     struct FibonacciClaim {
         step: usize, // nth fibonacci number
@@ -142,7 +143,7 @@ mod test {
             let mut a = Goldilocks::ONE;
             let mut b = witness.secret_b;
             // trace
-            for _ in 1..trace.len() {
+            for _ in 0..trace.len() {
                 let c = a + b;
                 trace.add_row(vec![a, b]);
                 a = b;
@@ -154,7 +155,7 @@ mod test {
     }
 
     impl Verifiable<Goldilocks> for FibonacciClaim {
-        fn constrains(&self, trace: &TraceTable<Goldilocks>) -> Vec<DensePolynomial<Goldilocks>> {
+        fn constrains(&self, trace: &TraceTable<Goldilocks>) -> Constrains<Goldilocks> {
             let mut constrains = Constrains::new(trace);
 
             // boundary polynomials
@@ -164,14 +165,15 @@ mod test {
             // transition polynomials
             let col_a = constrains.get_trace_poly(0);
             let col_b = constrains.get_trace_poly(1);
-            let omega = DensePolynomial::from_coefficients_slice(&[constrains.get_omega()]);
+            let omega =
+                DensePolynomial::from_coefficients_slice(&[constrains.get_domain().element(1)]);
 
             let carry_over_poly = col_a.clone() * omega.clone() - col_b.clone();
             let sum_poly = col_b.clone() * omega - (col_a + col_b);
             constrains.add_transition_constrain(carry_over_poly);
             constrains.add_transition_constrain(sum_poly);
 
-            constrains.constrains()
+            constrains
         }
     }
 
@@ -192,14 +194,20 @@ mod test {
         assert_eq!(*trace.get_value(claim.step - 1, 1), claim.output);
         assert_eq!(*trace.get_value(claim.step, 0), claim.output);
 
-        // let one = Goldilocks::ONE;
-        // let constrains = Constrains::new(&trace);
-        // let omega = constrains.get_omega();
-        // let constrains = constrains.constrains();
-        //
-        // // check constrains
-        // let boundary1 =
-        //     constrains[0].clone() * DensePolynomial::from_coefficients_slice(&[-one, one]);
-        // assert_eq!(boundary1.evaluate(&one), one);
+        let one = Goldilocks::ONE;
+        let zero = Goldilocks::ZERO;
+        let constrains = claim.constrains(&trace);
+        let domain = constrains.get_domain();
+        let constrains = constrains.constrains();
+
+        // check constrains
+        let boundary1 =
+            constrains[0].clone() * DensePolynomial::from_coefficients_slice(&[-one, one]);
+        assert_eq!(boundary1.evaluate(&one), zero);
+
+        let omega_4 = domain.element(claim.step - 1);
+        let z = DensePolynomial::from_coefficients_slice(&[-omega_4, one]);
+        let boundary2 = constrains[1].clone() * z;
+        assert_eq!(boundary2.evaluate(&claim.output), zero);
     }
 }

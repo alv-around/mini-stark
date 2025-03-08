@@ -1,6 +1,7 @@
 use ark_ff::Field;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
+use ark_poly::EvaluationDomain;
 use mini_starks::air::{Constrains, Provable, TraceTable, Verifiable};
 use mini_starks::field::Goldilocks;
 use std::error::Error;
@@ -35,7 +36,7 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
 }
 
 impl Verifiable<Goldilocks> for FibonacciClaim {
-    fn constrains(&self, trace: &TraceTable<Goldilocks>) -> Vec<DensePolynomial<Goldilocks>> {
+    fn constrains(&self, trace: &TraceTable<Goldilocks>) -> Constrains<Goldilocks> {
         let mut constrains = Constrains::new(trace);
 
         // boundary polynomials
@@ -45,14 +46,14 @@ impl Verifiable<Goldilocks> for FibonacciClaim {
         // transition polynomials
         let col_a = constrains.get_trace_poly(0);
         let col_b = constrains.get_trace_poly(1);
-        let omega = DensePolynomial::from_coefficients_slice(&[constrains.get_omega()]);
+        let omega = DensePolynomial::from_coefficients_slice(&[constrains.get_domain().element(1)]);
 
         let carry_over_poly = col_a.clone() * omega.clone() - col_b.clone();
         let sum_poly = col_b.clone() * omega - (col_a + col_b);
         constrains.add_transition_constrain(carry_over_poly);
         constrains.add_transition_constrain(sum_poly);
 
-        constrains.constrains()
+        constrains
     }
 }
 
