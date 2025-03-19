@@ -25,15 +25,33 @@ pub struct TraceTable<F: PrimeField> {
 
 impl<F: PrimeField> TraceTable<F> {
     pub fn new(steps: usize, width: usize) -> Self {
-        // FIXME: adjust trace table length to what is given to STARK config
+        // TODO: add random padding for [steps, depth) rows
+        // TODO: replace ceil with domain::new
         let depth = 1usize << ceil_log2_k::<TWO>(steps);
-        let data = Vec::<F>::with_capacity(depth * width);
+        let capacity = depth * width;
+        let mut data = Vec::<F>::with_capacity(capacity);
+        data.resize(capacity, F::ZERO);
         Self { depth, width, data }
     }
 
-    pub fn add_row(&mut self, row: Vec<F>) {
+    pub fn get_data(&self) -> &[F] {
+        &self.data[..]
+    }
+
+    pub fn add_row(&mut self, index: usize, row: Vec<F>) {
         assert_eq!(row.len(), self.width);
-        self.data.extend(row);
+        assert!(index < self.depth);
+        for (j, val) in row.into_iter().enumerate() {
+            self.data[index * self.width + j] = val;
+        }
+    }
+
+    pub fn add_col(&mut self, index: usize, col: Vec<F>) {
+        assert_eq!(col.len(), self.depth);
+        assert!(index < self.width);
+        for (i, val) in col.into_iter().enumerate() {
+            self.data[i * self.width + index] = val;
+        }
     }
 
     pub fn get_value(&self, row: usize, col: usize) -> &F {
@@ -72,6 +90,7 @@ impl<F: PrimeField> TraceTable<F> {
             domain,
             boundary_constrains: Vec::new(),
             transition_constrains: Vec::new(),
+            current: 0,
         }
     }
 }
@@ -81,11 +100,44 @@ pub struct Constrains<F: PrimeField> {
     trace_polys: Vec<DensePolynomial<F>>,
     boundary_constrains: Vec<DensePolynomial<F>>,
     transition_constrains: Vec<DensePolynomial<F>>,
+    current: usize,
+}
+
+impl<F: PrimeField> Iterator for Constrains<F> {
+    // We can refer to this type using Self::Item
+    type Item = DensePolynomial<F>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.len() {
+            return None;
+        }
+
+        let current;
+        let num_boundary_contrains = self.get_boundary_constrain_number();
+        if self.current >= num_boundary_contrains {
+            current = self
+                .get_transition_constrain(self.current - num_boundary_contrains)
+                .clone();
+        } else {
+            current = self.get_boundary_constrain(self.current).clone();
+        }
+
+        self.current += 1;
+        Some(current)
+    }
 }
 
 impl<F: PrimeField> Constrains<F> {
     pub fn get_trace_poly(&self, col: usize) -> DensePolynomial<F> {
         self.trace_polys[col].clone()
+    }
+
+    pub fn len(&self) -> usize {
+        self.boundary_constrains.len() + self.transition_constrains.len()
+    }
+
+    pub fn get_trace_polynomials(&self) -> Vec<DensePolynomial<F>> {
+        self.trace_polys.clone()
     }
 
     pub fn get_domain(&self) -> Radix2EvaluationDomain<F> {
@@ -154,9 +206,9 @@ mod test {
             let mut a = ONE;
             let mut b = ONE;
             // trace
-            for _ in 0..trace.len() {
+            for i in 0..trace.len() {
                 let c = a + b;
-                trace.add_row(vec![a, b]);
+                trace.add_row(i, vec![a, b]);
                 a = b;
                 b = c;
             }
