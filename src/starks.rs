@@ -1,31 +1,37 @@
 use crate::air::{Constrains, Provable, TraceTable, Verifiable};
 use crate::fri::FriProof;
 use crate::fri::{prover::Fri, verifier::FriVerifier};
-use crate::merkle::{Hash, MerkleTree, Tree};
+use crate::merkle::{Hash, MerkleRoot, MerkleTree, Tree};
 use ark_ff::PrimeField;
 use ark_poly::univariate::DensePolynomial;
-use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
+use ark_poly::{DenseUVPolynomial, EvaluationDomain, Radix2EvaluationDomain};
 use digest::Digest;
 use std::error::Error;
+use std::marker::PhantomData;
 
-struct StarkConfig<const N: usize, F, D> {
-    field: F,
-    blowup_factor: usize,
-    digest: D,
-}
-
-struct StarkProof<D: Digest, F: PrimeField> {
+pub struct StarkProof<D: Digest, F: PrimeField> {
+    pub degree: usize,
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
-    validity_poly_commit: Hash<D>,
+    validity_poly_commit: MerkleRoot<D>,
+    fri_commits: Vec<MerkleRoot<D>>,
     fri_proof: FriProof<D, F>,
 }
 
-struct Stark<const N: usize, D: Digest, F: PrimeField> {
-    config: StarkConfig<N, F, D>,
+pub struct Stark<const N: usize, D: Digest, F: PrimeField> {
+    blowup_factor: usize,
+    field: PhantomData<F>,
+    digest: PhantomData<D>,
 }
 
 impl<const N: usize, D: Digest, F: PrimeField> Stark<N, D, F> {
+    pub fn new(blowup_factor: usize) -> Self {
+        Self {
+            blowup_factor,
+            field: PhantomData,
+            digest: PhantomData,
+        }
+    }
     pub fn prove<T, AIR: Provable<T, F> + Verifiable<F>>(
         &self,
         claim: AIR,
@@ -35,8 +41,9 @@ impl<const N: usize, D: Digest, F: PrimeField> Stark<N, D, F> {
         beta: usize,
     ) -> Result<StarkProof<D, F>, Box<dyn Error>> {
         // // compute the lde of the trace & commit to it
-        let trace = claim.trace(witness);
-        let lde_domain_size = self.config.blowup_factor * trace.len();
+        let trace = claim.trace(&witness);
+        let degree = trace.len();
+        let lde_domain_size = self.blowup_factor * degree;
         let mut lde_trace = TraceTable::<F>::new(lde_domain_size, trace.width());
 
         // TODO: add the coset trick to add zk
@@ -65,31 +72,48 @@ impl<const N: usize, D: Digest, F: PrimeField> Stark<N, D, F> {
             constrain_poly = constrain_poly
                 + DensePolynomial::<_>::from_coefficients_vec(vec![r.pow([i as u64])]) * trace_poly;
         }
+
         let validity_poly = constrain_poly
             .clone()
             .evaluate_over_domain(lde_domain)
             .evals;
-        let validity_poly_commit = MerkleTree::<N, D, F>::new(&validity_poly).root();
 
         // // Make the low degree test FRI
-        let mut prover = Fri::<N, D, _>::new(constrain_poly, self.config.blowup_factor);
-        prover.commit_phase(alphas);
+        let mut prover = Fri::<N, D, _>::new(constrain_poly, self.blowup_factor);
+        let validity_poly_commit = prover.generate_commit();
+        let fri_commits = prover.commit_phase(alphas);
         let fri_proof = prover.query_phase(beta)?;
 
         Ok(StarkProof {
+            degree,
             trace_commit,
             constrain_trace_commit,
             validity_poly_commit,
+            fri_commits,
             fri_proof,
         })
     }
 
-    pub fn verify(constrains: Constrains<F>, proof: StarkProof<D, F>, z: F) -> bool {
-        let one = constrains.get_domain().element(0);
-        for i in 0..constrains.get_boundary_constrain_number() {
-            let boundary_constrain = constrains.get_boundary_constrain(i);
-            assert_eq!(boundary_constrain.evaluate(&one), F::ZERO);
+    pub fn verify(
+        &self,
+        constrains: Constrains<F>,
+        proof: StarkProof<D, F>,
+        alphas: Vec<F>,
+        beta: usize,
+    ) -> bool {
+        let mut commits = Vec::new();
+        commits.push(proof.validity_poly_commit);
+        for commit in proof.fri_commits {
+            commits.push(commit);
         }
-        false
+        let fri_verifier = FriVerifier::<N, D, F>::new_with_config(
+            proof.degree,
+            self.blowup_factor,
+            commits,
+            alphas,
+            beta,
+        );
+
+        fri_verifier.verify(proof.fri_proof)
     }
 }

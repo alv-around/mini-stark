@@ -42,6 +42,27 @@ impl<const TREE_WIDTH: usize, D: Digest, F: PrimeField> FriVerifier<TREE_WIDTH, 
         }
     }
 
+    // TODO:remove this function when fiat-shamir implemented
+    pub(crate) fn new_with_config(
+        degree: usize,
+        blowup_factor: usize,
+        commits: Vec<MerkleRoot<D>>,
+        alphas: Vec<F>,
+        beta: usize,
+    ) -> Self {
+        let domain_size = 1 << ceil_log2_k::<TREE_WIDTH>((degree + 1) * blowup_factor);
+        let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap();
+        Self {
+            domain_size,
+            rounds,
+            degree,
+            blowup_factor,
+            commits,
+            alphas,
+            beta: Some(beta),
+        }
+    }
+
     pub fn get_alpha(&self) -> &[F] {
         &self.alphas
     }

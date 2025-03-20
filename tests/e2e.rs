@@ -2,9 +2,13 @@ use ark_ff::{AdditiveGroup, Field};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Polynomial};
 use mini_starks::air::*;
 use mini_starks::field::Goldilocks;
+use mini_starks::starks::Stark;
+use sha2::Sha256;
 
 const ONE: Goldilocks = Goldilocks::ONE;
 const ZERO: Goldilocks = Goldilocks::ZERO;
+
+const TWO: usize = 2usize;
 
 struct FibonacciClaim {
     step: usize, // nth fibonacci number
@@ -16,7 +20,7 @@ struct Witness {
 }
 
 impl Provable<Witness, Goldilocks> for FibonacciClaim {
-    fn trace(&self, witness: Witness) -> TraceTable<Goldilocks> {
+    fn trace(&self, witness: &Witness) -> TraceTable<Goldilocks> {
         let trace_width = 2usize;
         let mut trace = TraceTable::new(self.step, trace_width);
 
@@ -24,9 +28,9 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
         let mut a = ONE;
         let mut b = witness.secret_b;
         // trace
-        for _ in 0..trace.len() {
+        for i in 0..trace.len() {
             let c = a + b;
-            trace.add_row(vec![a, b]);
+            trace.add_row(i, vec![a, b]);
             a = b;
             b = c;
         }
@@ -71,7 +75,7 @@ fn test_setup() -> (Witness, FibonacciClaim) {
 #[test]
 fn test_fibonacci_air_constrains() {
     let (witness, claim) = test_setup();
-    let trace = claim.trace(witness);
+    let trace = claim.trace(&witness);
     let constrains = claim.derive_constrains(&trace);
     let domain = constrains.get_domain();
 
@@ -92,4 +96,22 @@ fn test_fibonacci_air_constrains() {
         assert_eq!(carry_over_constrain.evaluate(&w_i), ZERO);
         assert_eq!(sum_constrain.evaluate(&w_i), ZERO);
     }
+}
+
+#[test]
+fn test_stark_prover() {
+    let (witness, claim) = test_setup();
+    let trace = claim.trace(&witness);
+    let constrains = claim.derive_constrains(&trace);
+    let beta = 3usize;
+    let alphas = vec![ONE; 3];
+
+    let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2usize);
+    let proof = proof_system
+        .prove(claim, witness, ONE, &alphas, beta)
+        .unwrap();
+    assert_eq!(proof.degree, 8);
+
+    let is_alright = proof_system.verify(constrains, proof, alphas, beta);
+    assert!(is_alright);
 }

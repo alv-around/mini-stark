@@ -10,7 +10,7 @@ use ark_poly::Polynomial;
 const TWO: usize = 2;
 
 pub trait Provable<W, F: PrimeField> {
-    fn trace(&self, witness: W) -> TraceTable<F>;
+    fn trace(&self, witness: &W) -> TraceTable<F>;
 }
 
 pub trait Verifiable<F: PrimeField> {
@@ -198,7 +198,7 @@ mod test {
     struct Witness;
 
     impl Provable<Witness, Goldilocks> for FibonacciClaim {
-        fn trace(&self, _witness: Witness) -> TraceTable<Goldilocks> {
+        fn trace(&self, _witness: &Witness) -> TraceTable<Goldilocks> {
             let trace_width = 2usize;
             let mut trace = TraceTable::new(self.step, trace_width);
 
@@ -247,7 +247,7 @@ mod test {
             step: 3,
             output: Goldilocks::from(3),
         };
-        let trace = third_fibonacci.trace(Witness);
+        let trace = third_fibonacci.trace(&Witness);
         assert_eq!(trace.len(), 4);
         assert_eq!(trace.width(), 2);
         assert_eq!(*trace.get_value(0, 0), ONE);
@@ -264,7 +264,7 @@ mod test {
             step: 4,
             output: Goldilocks::from(5),
         };
-        let trace = fourth_fib.trace(Witness);
+        let trace = fourth_fib.trace(&Witness);
         assert_eq!(trace.len(), 4);
         assert_eq!(trace.width(), 2);
         assert_eq!(*trace.get_value(0, 1), ONE);
@@ -280,7 +280,7 @@ mod test {
             step: 3,
             output: Goldilocks::from(3),
         };
-        let trace = claim.trace(Witness);
+        let trace = claim.trace(&Witness);
         let constrains = claim.derive_constrains(&trace);
         let domain = constrains.get_domain();
 
@@ -304,7 +304,7 @@ mod test {
             step: 3,
             output: Goldilocks::from(3),
         };
-        let trace = claim.trace(Witness);
+        let trace = claim.trace(&Witness);
         let constrains = claim.derive_constrains(&trace);
         let domain = constrains.get_domain();
         assert_eq!(constrains.get_boundary_constrain_number(), 3);
