@@ -3,14 +3,13 @@ use crate::merkle::{MerkleRoot, MerkleTree, Tree};
 use crate::util::{ceil_log2_k, logarithm_of_two_k};
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
-use ark_poly::univariate::DensePolynomial;
+use ark_poly::univariate::{DensePolynomial, SparsePolynomial};
 use ark_poly::EvaluationDomain;
 use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::Digest;
 
 pub struct FriProver<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     rounds: usize,
-    blowup_factor: usize,
     beta: Option<usize>,
     commits: Vec<FriRound<TREE_WIDH, D, F>>,
 }
@@ -18,17 +17,13 @@ pub struct FriProver<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
 impl<const W: usize, D: Digest, F: PrimeField> FriProver<W, D, F> {
     pub fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
         let d = poly.degree();
-        let domain_size = 1 << ceil_log2_k::<W>((d + 1) * blowup_factor);
-        let rounds = logarithm_of_two_k::<W>(domain_size);
-        let rounds = rounds.unwrap();
+        let domain = Radix2EvaluationDomain::<F>::new(d * blowup_factor).unwrap();
+        let domain_size = domain.size as usize;
+        let rounds = domain.log_size_of_group as usize;
 
         let power_offset = domain_size - d - 1;
-        let x = DensePolynomial::<F>::from_coefficients_vec(vec![F::ZERO, F::ONE]);
-        let mut x_power = DensePolynomial::<F>::from_coefficients_vec(vec![F::ONE]);
-        for _ in 0..power_offset {
-            x_power = x_power.naive_mul(&x);
-        }
-        let poly_offset = x_power.naive_mul(&poly) + poly;
+        let x_power = SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
+        let poly_offset = DensePolynomial::from(x_power).naive_mul(&poly) + poly;
 
         let mut commits = Vec::<FriRound<W, D, F>>::with_capacity(rounds);
         let first_round = FriRound::new(poly_offset, domain_size);
@@ -36,7 +31,6 @@ impl<const W: usize, D: Digest, F: PrimeField> FriProver<W, D, F> {
 
         Self {
             rounds,
-            blowup_factor,
             beta: None,
             commits,
         }
