@@ -8,14 +8,14 @@ use ark_poly::EvaluationDomain;
 use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::Digest;
 
-pub struct Fri<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
+pub struct FriProver<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     rounds: usize,
     blowup_factor: usize,
     beta: Option<usize>,
     commits: Vec<FriRound<TREE_WIDH, D, F>>,
 }
 
-impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
+impl<const W: usize, D: Digest, F: PrimeField> FriProver<W, D, F> {
     pub fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
         let d = poly.degree();
         let domain_size = 1 << ceil_log2_k::<W>((d + 1) * blowup_factor);
@@ -100,7 +100,7 @@ impl<const W: usize, D: Digest, F: PrimeField> Fri<W, D, F> {
 
             // q(x) = f(x) - g(x) / Z(x)
             let numerator = previous_poly.clone() - g;
-            let vanishing_poly = Fri::<W, D, F>::calculate_vanishing_poly(&[x1, x2]);
+            let vanishing_poly = FriProver::<W, D, F>::calculate_vanishing_poly(&[x1, x2]);
             let q = numerator / vanishing_poly;
             println!("quotient: {:?}", q);
             quotients.push(q.to_vec());
@@ -199,7 +199,7 @@ mod test {
         let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let mut fri = Fri::<TWO, Sha256, _>::new(poly, blowup_factor);
+        let mut fri = FriProver::<TWO, Sha256, _>::new(poly, blowup_factor);
         assert_eq!(fri.rounds, 3);
 
         let mut alphas = Vec::new();

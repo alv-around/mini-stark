@@ -3,7 +3,7 @@ use ark_poly::{DenseUVPolynomial, Polynomial};
 use sha2::Sha256;
 
 use mini_starks::field::Goldilocks;
-use mini_starks::fri::prover::Fri;
+use mini_starks::fri::prover::FriProver;
 use mini_starks::fri::verifier::FriVerifier;
 
 const TWO: usize = 2;
@@ -13,7 +13,7 @@ fn main() {
     let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
     let poly = DensePolynomial::from_coefficients_vec(coeffs);
     let degree = poly.degree();
-    let mut fri = Fri::<TWO, Sha256, _>::new(poly, blowup_factor);
+    let mut fri = FriProver::<TWO, Sha256, _>::new(poly, blowup_factor);
     let mut verifier =
         FriVerifier::<TWO, Sha256, Goldilocks>::new(fri.generate_commit(), degree, blowup_factor);
 

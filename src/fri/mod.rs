@@ -18,7 +18,7 @@ mod test {
     use ark_poly::{DenseUVPolynomial, Polynomial};
     use sha2::Sha256;
 
-    use super::prover::Fri;
+    use super::prover::FriProver;
     use super::verifier::FriVerifier;
 
     const TWO: usize = 2;
@@ -29,7 +29,7 @@ mod test {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let degree = poly.degree();
-        let mut fri = Fri::<TWO, Sha256, _>::new(poly, blowup_factor);
+        let mut fri = FriProver::<TWO, Sha256, _>::new(poly, blowup_factor);
         let mut verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
             fri.generate_commit(),
             degree,
