@@ -1,5 +1,4 @@
 use super::FriProof;
-use crate::fri::fiatshamir::FriIOPattern;
 use crate::merkle::{Hash, MerkleTree, Tree};
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -9,8 +8,8 @@ use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
 use nimue::plugins::ark::FieldChallenges;
+use nimue::DigestBridge;
 use nimue::{ByteChallenges, ByteWriter, Merlin};
-use nimue::{DigestBridge, IOPattern};
 
 pub struct FriProver<const TREE_WIDH: usize, D: Digest, F: PrimeField>
 where
@@ -27,15 +26,15 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
-    pub fn new(poly: DensePolynomial<F>, blowup_factor: usize) -> Self {
+    pub fn new(
+        transcript: Merlin<DigestBridge<D>>,
+        poly: DensePolynomial<F>,
+        blowup_factor: usize,
+    ) -> Self {
         let d = poly.degree();
         let domain = Radix2EvaluationDomain::<F>::new(d * blowup_factor).unwrap();
         let domain_size = domain.size as usize;
         let round_num = domain.log_size_of_group as usize;
-
-        //
-        let transcript: IOPattern<DigestBridge<D>> = FriIOPattern::<D, F>::new_fri("🍟", round_num);
-        let transcript = transcript.to_merlin();
 
         // degree padding
         let power_offset = domain_size - d - 1;
@@ -144,6 +143,7 @@ where
         }
 
         Ok(FriProof {
+            transcript: self.transcript.transcript(),
             commits,
             points,
             queries,
@@ -214,6 +214,8 @@ impl<const W: usize, D: Digest, F: PrimeField> FriRound<W, D, F> {
 mod test {
     use super::*;
     use crate::field::Goldilocks;
+    use crate::fri::fiatshamir::FriIOPattern;
+    use nimue::IOPattern;
     use sha2::{self, Sha256};
 
     const TWO: usize = 2;
@@ -223,8 +225,10 @@ mod test {
         let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
+        let transcript: IOPattern<DigestBridge<Sha256>> =
+            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
 
-        let mut fri = FriProver::<TWO, Sha256, _>::new(poly, blowup_factor);
+        let mut fri = FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
         assert_eq!(fri.round_num, 3);
 
         let proof = fri.prove();
