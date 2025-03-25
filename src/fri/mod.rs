@@ -2,13 +2,12 @@ pub mod fiatshamir;
 pub mod prover;
 pub mod verifier;
 
-use crate::merkle::{Hash, MerklePath};
+use crate::merkle::MerklePath;
 use ark_ff::PrimeField;
 use digest::Digest;
 
 pub struct FriProof<'a, D: Digest, F: PrimeField> {
     transcript: &'a [u8],
-    commits: Vec<Hash<D>>,
     points: Vec<[(F, F); 3]>,
     queries: Vec<[MerklePath<D, F>; 3]>,
     quotients: Vec<Vec<F>>,
@@ -37,17 +36,15 @@ mod test {
         let degree = poly.degree();
         let transcript: IOPattern<DigestBridge<Sha256>> =
             FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
-        let hash = *Hash::<Sha256>::from_slice(&[
-            196, 120, 254, 173, 12, 137, 183, 149, 64, 99, 143, 132, 76, 136, 25, 217, 164, 40, 23,
-            99, 175, 146, 114, 199, 243, 150, 135, 118, 182, 5, 35, 69,
-        ]);
-
         let mut fri_prover =
             FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
+
+        let commit = fri_prover.get_initial_commit();
+
         let proof = fri_prover.prove();
         let verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
             transcript,
-            MerkleRoot(hash),
+            MerkleRoot(commit),
             degree,
             blowup_factor,
         );

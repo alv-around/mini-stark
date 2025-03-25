@@ -1,5 +1,5 @@
 use super::FriProof;
-use crate::merkle::{Hash, MerkleTree, Tree};
+use crate::merkle::{Hash, MerkleRoot, MerkleTree, Tree};
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::{DensePolynomial, SparsePolynomial};
@@ -52,9 +52,13 @@ where
         }
     }
 
+    pub fn get_initial_commit(&self) -> Hash<D> {
+        self.rounds[0].commit.root()
+    }
+
     pub fn prove(&mut self) -> FriProof<D, F> {
-        let commits = self.commit_phase();
-        self.query_phase(commits).unwrap()
+        self.commit_phase();
+        self.query_phase().unwrap()
     }
 
     pub fn commit_phase(&mut self) -> Vec<Hash<D>> {
@@ -85,9 +89,8 @@ where
         commits
     }
 
-    pub fn query_phase(&mut self, commits: Vec<Hash<D>>) -> Result<FriProof<D, F>, &str> {
-        let length_beta = usize::div_ceil(1 << self.round_num, 3);
-        let mut beta = vec![0u8; length_beta];
+    pub fn query_phase(&mut self) -> Result<FriProof<D, F>, &str> {
+        let mut beta = vec![0u8; 4];
         self.transcript.fill_challenge_bytes(&mut beta).unwrap();
         let mut queries = Vec::new();
         let mut points = Vec::new();
@@ -98,12 +101,9 @@ where
         let mut previous_poly = &previous_round.poly;
         let mut previous_commit = &previous_round.commit;
         let mut previous_domain = &previous_round.domain;
-        let mut previous_beta = usize::from_le_bytes(
-            [beta, vec![0u8; 8 - length_beta]]
-                .concat()
-                .try_into()
-                .unwrap(),
-        );
+        let mut previous_beta =
+            usize::from_le_bytes([beta, vec![0u8; 4]].concat().try_into().unwrap());
+        println!("written beta: {}", previous_beta);
         for round in rounds_iter {
             assert_eq!(previous_domain.size() / W, round.domain.size());
 
@@ -144,7 +144,6 @@ where
 
         Ok(FriProof {
             transcript: self.transcript.transcript(),
-            commits,
             points,
             queries,
             quotients,
@@ -231,7 +230,6 @@ mod test {
         let mut fri = FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
         assert_eq!(fri.round_num, 3);
 
-        let proof = fri.prove();
-        assert_eq!(proof.commits.len(), 3);
+        let _proof = fri.prove();
     }
 }

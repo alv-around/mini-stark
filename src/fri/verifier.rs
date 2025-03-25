@@ -60,7 +60,7 @@ where
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
 
-        for _ in 0..self.rounds - 1 {
+        for i in 0..self.rounds - 1 {
             //TODO: move next lines to DigestReader trait
             let mut digest_bytes = vec![0u8; <D as OutputSizeUser>::output_size()];
             arthur.fill_next_bytes(&mut digest_bytes).unwrap();
@@ -84,10 +84,9 @@ where
 
     pub fn verify(&self, proof: FriProof<D, F>) -> bool {
         let (commits, alphas, beta) = self.read_proof_transcript(proof.transcript).unwrap();
-
-        if commits.len() != self.rounds || commits[0].0 != self.commit.0 {
-            return false;
-        } else if commits.len() - 1 != proof.points.len() {
+        assert_eq!(1 << commits.len(), (self.degree + 1) * self.blowup_factor);
+        assert_eq!(commits[0].0, self.commit.0);
+        if commits.len() != self.rounds || commits.len() - 1 != proof.points.len() {
             return false;
         }
 
@@ -106,7 +105,6 @@ where
             let total_degree = quotient.degree() + vanishing_poly.degree();
             assert!(total_degree >= 2);
             assert!(total_degree <= 1 << (self.rounds - i));
-            // FIXME: find a better solution to divide by vanishing poly
             let _ = quotient / vanishing_poly;
 
             // linearity test
