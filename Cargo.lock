@@ -642,6 +642,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "html5ever"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -957,6 +963,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecc2af9a1119c51f12a14607e783cb977bde58bc069ff0c3da1095e635d70654"
+dependencies = [
+ "cpufeatures",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.169"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,6 +1047,7 @@ dependencies = [
  "ark-test-curves",
  "digest",
  "itertools 0.14.0",
+ "nimue",
  "num-traits",
  "rand 0.9.0",
  "sha2",
@@ -1080,6 +1096,22 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
+
+[[package]]
+name = "nimue"
+version = "0.2.0"
+source = "git+https://github.com/arkworks-rs/nimue#0e584985d78ec92f583d098bd6e0d0dbb189be0f"
+dependencies = [
+ "ark-ec",
+ "ark-ff",
+ "ark-serialize",
+ "digest",
+ "hex",
+ "keccak",
+ "log",
+ "rand 0.8.5",
+ "zeroize",
+]
 
 [[package]]
 name = "num-bigint"
