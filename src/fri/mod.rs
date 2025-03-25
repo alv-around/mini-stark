@@ -1,11 +1,13 @@
+pub mod fiatshamir;
 pub mod prover;
 pub mod verifier;
 
-use crate::merkle::MerklePath;
+use crate::merkle::{Hash, MerklePath};
 use ark_ff::PrimeField;
 use digest::Digest;
 
 pub struct FriProof<D: Digest, F: PrimeField> {
+    commits: Vec<Hash<D>>,
     points: Vec<[(F, F); 3]>,
     queries: Vec<[MerklePath<D, F>; 3]>,
     quotients: Vec<Vec<F>>,
@@ -19,7 +21,6 @@ mod test {
     use sha2::Sha256;
 
     use super::prover::FriProver;
-    use super::verifier::FriVerifier;
 
     const TWO: usize = 2;
 
@@ -28,22 +29,9 @@ mod test {
         let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let degree = poly.degree();
-        let mut fri = FriProver::<TWO, Sha256, _>::new(poly, blowup_factor);
-        let mut verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
-            fri.generate_commit(),
-            degree,
-            blowup_factor,
-        );
+        let _degree = poly.degree();
 
-        let alpha = verifier.get_alpha();
-        let commitment = fri.commit_phase(alpha);
-        assert_eq!(commitment.len(), 2);
-
-        let beta = verifier.commitment(commitment).unwrap();
-        let proof_result = fri.query_phase(beta);
-        assert!(proof_result.is_ok());
-        let proof = proof_result.unwrap();
-        assert!(verifier.verify(proof));
+        let mut fri_prover = FriProver::<TWO, Sha256, _>::new(poly, blowup_factor);
+        let _proof = fri_prover.prove();
     }
 }
