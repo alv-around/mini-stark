@@ -44,7 +44,7 @@ where
                 <D as digest::OutputSizeUser>::output_size(),
                 "add merkle commit: commit to last fri round",
             )
-            .challenge_bytes(4, "random scallar challenge: query_phase");
+            .challenge_bytes(8, "query phase: choose a random element in the domain");
 
         self
     }

@@ -17,7 +17,7 @@ pub struct FriProof<'a, D: Digest, F: PrimeField> {
 mod test {
     use crate::field::Goldilocks;
     use crate::fri::fiatshamir::FriIOPattern;
-    use crate::merkle::{Hash, MerkleRoot};
+    use crate::merkle::MerkleRoot;
     use ark_poly::univariate::DensePolynomial;
     use ark_poly::{DenseUVPolynomial, Polynomial};
     use nimue::{DigestBridge, IOPattern};

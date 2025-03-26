@@ -1,5 +1,5 @@
 use super::FriProof;
-use crate::merkle::{Hash, MerkleRoot, MerkleTree, Tree};
+use crate::merkle::{Hash, MerkleTree, Tree};
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::{DensePolynomial, SparsePolynomial};
@@ -90,8 +90,14 @@ where
     }
 
     pub fn query_phase(&mut self) -> Result<FriProof<D, F>, &str> {
-        let mut beta = vec![0u8; 4];
+        let mut beta = [0u8; 8]; // usize is 64-bits
         self.transcript.fill_challenge_bytes(&mut beta).unwrap();
+        let mut beta = usize::from_le_bytes(beta);
+        let domain_size = self.rounds[0].domain.size();
+        if beta > domain_size {
+            beta %= domain_size;
+        }
+
         let mut queries = Vec::new();
         let mut points = Vec::new();
         let mut quotients = Vec::new();
@@ -101,20 +107,17 @@ where
         let mut previous_poly = &previous_round.poly;
         let mut previous_commit = &previous_round.commit;
         let mut previous_domain = &previous_round.domain;
-        let mut previous_beta =
-            usize::from_le_bytes([beta, vec![0u8; 4]].concat().try_into().unwrap());
-        println!("written beta: {}", previous_beta);
         for round in rounds_iter {
             assert_eq!(previous_domain.size() / W, round.domain.size());
 
-            let x1 = previous_domain.element(previous_beta);
-            let x2 = previous_domain.element(round.domain.size() + previous_beta);
-            let x3 = round.domain.element(previous_beta);
+            let x1 = previous_domain.element(beta);
+            let x2 = previous_domain.element(round.domain.size() + beta);
+            let x3 = round.domain.element(beta);
             let y1 = previous_poly.evaluate(&x1);
             let y2 = previous_poly.evaluate(&x2);
             let y3 = round.poly.evaluate(&x3);
             points.push([(x1, y1), (x2, y2), (x3, y3)]);
-            assert_eq!(x3, previous_domain.element(2 * previous_beta));
+            assert_eq!(x3, previous_domain.element(2 * beta));
 
             // quotienting
             // g(x) = ax + b
@@ -138,7 +141,7 @@ where
             previous_poly = &round.poly;
             previous_commit = &round.commit;
             previous_domain = &round.domain;
-            previous_beta %= round.domain.size();
+            beta %= round.domain.size();
             println!("another round achieved");
         }
 

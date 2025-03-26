@@ -1,5 +1,5 @@
 use super::FriProof;
-use crate::merkle::{Hash, MerkleRoot};
+use crate::merkle::MerkleRoot;
 use crate::util::{ceil_log2_k, logarithm_of_two_k};
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -60,7 +60,7 @@ where
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
 
-        for i in 0..self.rounds - 1 {
+        for _ in 0..self.rounds - 1 {
             //TODO: move next lines to DigestReader trait
             let mut digest_bytes = vec![0u8; <D as OutputSizeUser>::output_size()];
             arthur.fill_next_bytes(&mut digest_bytes).unwrap();
@@ -77,9 +77,12 @@ where
         commits.push(MerkleRoot(digest));
 
         let beta = arthur.challenge_bytes().unwrap();
-        let padded_beta = usize::from_le_bytes([beta, [0u8; 4]].concat().try_into().unwrap());
+        let mut beta = usize::from_le_bytes(beta);
+        if beta > self.domain_size {
+            beta %= self.domain_size;
+        }
 
-        Ok((commits, alphas, padded_beta))
+        Ok((commits, alphas, beta))
     }
 
     pub fn verify(&self, proof: FriProof<D, F>) -> bool {
