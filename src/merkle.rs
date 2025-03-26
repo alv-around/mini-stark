@@ -1,6 +1,6 @@
-use crate::util::logarithm_of_two_k;
+use crate::{util::logarithm_of_two_k, Hash};
 use ark_ff::PrimeField;
-use digest::{generic_array::GenericArray, Digest, OutputSizeUser};
+use digest::Digest;
 use std::ops::Range;
 
 pub trait Tree<const N: usize> {
@@ -15,8 +15,6 @@ pub trait Tree<const N: usize> {
     fn calculate_from_leafs(children: &[Self::Input]) -> Self::Inner;
     fn calculate_from_nodes(children: &[Self::Inner]) -> Self::Inner;
 }
-
-pub type Hash<D> = GenericArray<u8, <D as OutputSizeUser>::OutputSize>;
 
 pub struct MerkleTree<const N: usize, D: Digest, F: PrimeField> {
     leafs: Vec<F>,

@@ -1,3 +1,4 @@
+pub mod fiatshamir;
 pub mod prover;
 pub mod verifier;
 
@@ -5,7 +6,8 @@ use crate::merkle::MerklePath;
 use ark_ff::PrimeField;
 use digest::Digest;
 
-pub struct FriProof<D: Digest, F: PrimeField> {
+pub struct FriProof<'a, D: Digest, F: PrimeField> {
+    transcript: &'a [u8],
     points: Vec<[(F, F); 3]>,
     queries: Vec<[MerklePath<D, F>; 3]>,
     quotients: Vec<Vec<F>>,
@@ -14,11 +16,14 @@ pub struct FriProof<D: Digest, F: PrimeField> {
 #[cfg(test)]
 mod test {
     use crate::field::Goldilocks;
+    use crate::fri::fiatshamir::FriIOPattern;
+    use crate::merkle::MerkleRoot;
     use ark_poly::univariate::DensePolynomial;
     use ark_poly::{DenseUVPolynomial, Polynomial};
+    use nimue::{DigestBridge, IOPattern};
     use sha2::Sha256;
 
-    use super::prover::Fri;
+    use super::prover::FriProver;
     use super::verifier::FriVerifier;
 
     const TWO: usize = 2;
@@ -29,21 +34,20 @@ mod test {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let degree = poly.degree();
-        let mut fri = Fri::<TWO, Sha256, _>::new(poly, blowup_factor);
-        let mut verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
-            fri.generate_commit(),
+        let transcript: IOPattern<DigestBridge<Sha256>> =
+            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let mut fri_prover =
+            FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
+
+        let commit = fri_prover.get_initial_commit();
+
+        let proof = fri_prover.prove();
+        let verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
+            transcript,
+            MerkleRoot(commit),
             degree,
             blowup_factor,
         );
-
-        let alpha = verifier.get_alpha();
-        let commitment = fri.commit_phase(alpha);
-        assert_eq!(commitment.len(), 2);
-
-        let beta = verifier.commitment(commitment).unwrap();
-        let proof_result = fri.query_phase(beta);
-        assert!(proof_result.is_ok());
-        let proof = proof_result.unwrap();
         assert!(verifier.verify(proof));
     }
 }

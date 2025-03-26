@@ -1,4 +1,4 @@
-use crate::fri::{prover::Fri, verifier::FriVerifier};
+use crate::fri::{prover::FriProver, verifier::FriVerifier};
 use ark_ff::PrimeField;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, Polynomial};
@@ -6,7 +6,7 @@ use digest::Digest;
 
 struct STARK<const N: usize, D: Digest, F: PrimeField> {
     polys: Vec<DensePolynomial<F>>,
-    prover: Fri<N, D, F>,
+    prover: FriProver<N, D, F>,
 }
 
 impl<const N: usize, D: Digest, F: PrimeField> STARK<N, D, F> {
@@ -21,7 +21,7 @@ impl<const N: usize, D: Digest, F: PrimeField> STARK<N, D, F> {
                 ]) * f;
         }
         let max_d = polys.iter().map(|x| x.degree()).max();
-        let prover = Fri::<N, D, _>::new(batch_poly, blowup_factor);
+        let prover = FriProver::<N, D, _>::new(batch_poly, blowup_factor);
         Self { polys, prover }
     }
 }
