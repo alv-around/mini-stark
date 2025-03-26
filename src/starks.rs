@@ -1,11 +1,14 @@
 use crate::air::{Constrains, Provable, TraceTable, Verifiable};
 use crate::fri::FriProof;
-use crate::fri::{prover::Fri, verifier::FriVerifier};
-use crate::merkle::{Hash, MerkleRoot, MerkleTree, Tree};
+use crate::fri::{prover::FriProver, verifier::FriVerifier};
+use crate::merkle::{MerkleRoot, MerkleTree, Tree};
+use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Radix2EvaluationDomain};
-use digest::Digest;
+use digest::core_api::BlockSizeUser;
+use digest::{Digest, FixedOutputReset};
+use nimue::{DigestBridge, IOPattern, Merlin};
 use std::error::Error;
 use std::marker::PhantomData;
 
@@ -13,8 +16,6 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     pub degree: usize,
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
-    validity_poly_commit: MerkleRoot<D>,
-    fri_commits: Vec<MerkleRoot<D>>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -24,7 +25,11 @@ pub struct Stark<const N: usize, D: Digest, F: PrimeField> {
     digest: PhantomData<D>,
 }
 
-impl<const N: usize, D: Digest, F: PrimeField> Stark<N, D, F> {
+impl<const N: usize, D, F> Stark<N, D, F>
+where
+    F: PrimeField,
+    D: Digest + FixedOutputReset + BlockSizeUser + Clone,
+{
     pub fn new(blowup_factor: usize) -> Self {
         Self {
             blowup_factor,
@@ -34,11 +39,10 @@ impl<const N: usize, D: Digest, F: PrimeField> Stark<N, D, F> {
     }
     pub fn prove<T, AIR: Provable<T, F> + Verifiable<F>>(
         &self,
+        merlin: Merlin<DigestBridge<D>>,
         claim: AIR,
         witness: T,
         r: F,
-        alphas: &[F],
-        beta: usize,
     ) -> Result<StarkProof<D, F>, Box<dyn Error>> {
         // // compute the lde of the trace & commit to it
         let trace = claim.trace(&witness);
@@ -79,39 +83,28 @@ impl<const N: usize, D: Digest, F: PrimeField> Stark<N, D, F> {
             .evals;
 
         // // Make the low degree test FRI
-        let mut prover = Fri::<N, D, _>::new(constrain_poly, self.blowup_factor);
-        let validity_poly_commit = prover.generate_commit();
-        let fri_commits = prover.commit_phase(alphas);
-        let fri_proof = prover.query_phase(beta)?;
+        let mut prover = FriProver::<N, D, _>::new(merlin, constrain_poly, self.blowup_factor);
+        let fri_proof = prover.prove();
 
         Ok(StarkProof {
             degree,
             trace_commit,
             constrain_trace_commit,
-            validity_poly_commit,
-            fri_commits,
             fri_proof,
         })
     }
 
     pub fn verify(
         &self,
+        transcript: IOPattern<DigestBridge<D>>,
         constrains: Constrains<F>,
         proof: StarkProof<D, F>,
-        alphas: Vec<F>,
-        beta: usize,
     ) -> bool {
-        let mut commits = Vec::new();
-        commits.push(proof.validity_poly_commit);
-        for commit in proof.fri_commits {
-            commits.push(commit);
-        }
-        let fri_verifier = FriVerifier::<N, D, F>::new_with_config(
+        let fri_verifier = FriVerifier::<N, D, F>::new(
+            transcript,
+            MerkleRoot(proof.constrain_trace_commit),
             proof.degree,
             self.blowup_factor,
-            commits,
-            alphas,
-            beta,
         );
 
         fri_verifier.verify(proof.fri_proof)
