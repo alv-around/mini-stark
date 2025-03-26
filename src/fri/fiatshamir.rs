@@ -1,4 +1,4 @@
-use crate::merkle::Hash;
+use crate::Hash;
 use ark_ff::Field;
 use digest::core_api::BlockSizeUser;
 use digest::{generic_array::GenericArray, Digest, FixedOutputReset, OutputSizeUser};

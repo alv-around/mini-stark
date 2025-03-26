@@ -143,7 +143,7 @@ mod test {
     use super::*;
     use crate::field::Goldilocks;
     use crate::fri::fiatshamir::FriIOPattern;
-    use crate::merkle::Hash;
+    use crate::Hash;
     use ark_poly::univariate::DensePolynomial;
     use ark_poly::{DenseUVPolynomial, Polynomial};
     use sha2::Sha256;

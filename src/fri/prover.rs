@@ -1,5 +1,6 @@
 use super::FriProof;
-use crate::merkle::{Hash, MerkleTree, Tree};
+use crate::merkle::{MerkleTree, Tree};
+use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::{DensePolynomial, SparsePolynomial};
