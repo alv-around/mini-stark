@@ -1,3 +1,4 @@
+use super::fiatshamir::DigestReader;
 use super::FriProof;
 use crate::merkle::MerkleRoot;
 use crate::util::{ceil_log2_k, logarithm_of_two_k};
@@ -7,11 +8,13 @@ use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial};
 use ark_std::test_rng;
 use digest::core_api::BlockSizeUser;
-use digest::{generic_array::GenericArray, Digest, FixedOutputReset, OutputSizeUser};
+use digest::{Digest, FixedOutputReset};
 use nimue::plugins::ark::FieldChallenges;
-use nimue::{ByteChallenges, ByteReader, DigestBridge, IOPattern, IOPatternError};
+use nimue::{Arthur, ByteChallenges, DigestBridge, IOPattern, IOPatternError};
 use std::iter::zip;
 use std::marker::PhantomData;
+
+pub struct Transcript<D: Digest, F: PrimeField>(Vec<MerkleRoot<D>>, Vec<F>, usize);
 
 pub struct FriVerifier<const TREE_WIDTH: usize, D, F>
 where
@@ -55,25 +58,20 @@ where
     pub fn read_proof_transcript(
         &self,
         transcript: &[u8],
-    ) -> Result<(Vec<MerkleRoot<D>>, Vec<F>, usize), IOPatternError> {
-        let mut arthur = self.transcript.to_arthur(transcript);
+    ) -> Result<Transcript<D, F>, IOPatternError> {
+        let mut arthur: Arthur<'_, DigestBridge<D>, u8> = self.transcript.to_arthur(transcript);
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
 
         for _ in 0..self.rounds - 1 {
-            //TODO: move next lines to DigestReader trait
-            let mut digest_bytes = vec![0u8; <D as OutputSizeUser>::output_size()];
-            arthur.fill_next_bytes(&mut digest_bytes).unwrap();
-            let digest = GenericArray::from_exact_iter(digest_bytes).unwrap();
+            let digest = arthur.next_digest().unwrap();
             commits.push(MerkleRoot(digest));
 
             let alpha: [F; 1] = arthur.challenge_scalars().unwrap();
             alphas.push(alpha[0]);
         }
 
-        let mut digest_bytes = vec![0u8; <D as OutputSizeUser>::output_size()];
-        arthur.fill_next_bytes(&mut digest_bytes).unwrap();
-        let digest = GenericArray::from_exact_iter(digest_bytes).unwrap();
+        let digest = arthur.next_digest().unwrap();
         commits.push(MerkleRoot(digest));
 
         let beta = arthur.challenge_bytes().unwrap();
@@ -82,11 +80,12 @@ where
             beta %= self.domain_size;
         }
 
-        Ok((commits, alphas, beta))
+        Ok(Transcript(commits, alphas, beta))
     }
 
     pub fn verify(&self, proof: FriProof<D, F>) -> bool {
-        let (commits, alphas, beta) = self.read_proof_transcript(proof.transcript).unwrap();
+        let Transcript(commits, alphas, beta) =
+            self.read_proof_transcript(proof.transcript).unwrap();
         assert_eq!(1 << commits.len(), (self.degree + 1) * self.blowup_factor);
         assert_eq!(commits[0].0, self.commit.0);
         if commits.len() != self.rounds || commits.len() - 1 != proof.points.len() {
