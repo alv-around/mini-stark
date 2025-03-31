@@ -1,4 +1,5 @@
 pub mod air;
+pub mod fiatshamir;
 pub mod field;
 pub mod fri;
 mod merkle;

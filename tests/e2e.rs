@@ -1,8 +1,10 @@
 use ark_ff::{AdditiveGroup, Field};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Polynomial};
 use mini_starks::air::*;
+use mini_starks::fiatshamir::StarkIOPattern;
 use mini_starks::field::Goldilocks;
 use mini_starks::starks::Stark;
+use nimue::{DigestBridge, IOPattern};
 use sha2::Sha256;
 
 const ONE: Goldilocks = Goldilocks::ONE;
@@ -102,16 +104,15 @@ fn test_fibonacci_air_constrains() {
 fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
-    let constrains = claim.derive_constrains(&trace);
-    let beta = 3usize;
-    let alphas = vec![ONE; 3];
+    let _constrains = claim.derive_constrains(&trace);
+
+    let io: IOPattern<DigestBridge<Sha256>> = StarkIOPattern::<_, Goldilocks>::new_stark(3, "🐺");
+    let transcript = io.to_merlin();
 
     let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2usize);
-    // let proof = proof_system
-    //     .prove(claim, witness, ONE, &alphas, beta)
-    //     .unwrap();
-    // assert_eq!(proof.degree, 8);
+    let proof = proof_system.prove(transcript, claim, witness).unwrap();
+    assert_eq!(proof.degree, 8);
 
-    // let is_alright = proof_system.verify(constrains, proof, alphas);
+    // let is_alright = proof_system.verify(io, constrains, proof);
     // assert!(is_alright);
 }
