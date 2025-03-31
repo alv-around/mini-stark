@@ -12,23 +12,23 @@ use nimue::plugins::ark::FieldChallenges;
 use nimue::DigestBridge;
 use nimue::{ByteChallenges, ByteWriter, Merlin};
 
-pub struct FriProver<const TREE_WIDH: usize, D: Digest, F: PrimeField>
+pub struct FriProver<'a, const TREE_WIDH: usize, D: Digest, F: PrimeField>
 where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
     round_num: usize,
-    transcript: Merlin<DigestBridge<D>>,
+    transcript: &'a mut Merlin<DigestBridge<D>>,
     rounds: Vec<FriRound<TREE_WIDH, D, F>>,
 }
 
-impl<const W: usize, D, F> FriProver<W, D, F>
+impl<'a, const W: usize, D, F> FriProver<'a, W, D, F>
 where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
     pub fn new(
-        transcript: Merlin<DigestBridge<D>>,
+        transcript: &'a mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
         blowup_factor: usize,
     ) -> Self {
@@ -72,8 +72,7 @@ where
             self.transcript.add_bytes(&commit).unwrap();
             commits.push(commit);
 
-            let mut alpha = [F::ZERO; 1];
-            self.transcript.fill_challenge_scalars(&mut alpha).unwrap();
+            let alpha: [F; 1] = self.transcript.challenge_scalars().unwrap();
             let folded_poly =
                 FriRound::<W, D, _>::split_and_fold(&previous_round.poly.clone(), alpha[0]);
             let domain_size = folded_poly.degree() + 1;
@@ -228,10 +227,10 @@ mod test {
         let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let transcript: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let io: IOPattern<DigestBridge<Sha256>> = FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let mut transcript = io.to_merlin();
 
-        let fri = FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
+        let fri = FriProver::<TWO, Sha256, _>::new(&mut transcript, poly, blowup_factor);
         assert_eq!(fri.round_num, 3);
 
         let _proof = fri.prove();

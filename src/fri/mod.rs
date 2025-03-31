@@ -35,16 +35,16 @@ mod test {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let degree = poly.degree();
-        let transcript: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
-        let fri_prover =
-            FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
+        let io: IOPattern<DigestBridge<Sha256>> = FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let mut transcript = io.to_merlin();
+
+        let fri_prover = FriProver::<TWO, Sha256, _>::new(&mut transcript, poly, blowup_factor);
 
         let commit = fri_prover.get_initial_commit();
 
         let proof = fri_prover.prove();
         let verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
-            transcript,
+            io,
             MerkleRoot(commit),
             degree,
             blowup_factor,
