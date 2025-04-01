@@ -96,7 +96,7 @@ impl<F: PrimeField> TraceTable<F> {
 }
 
 pub struct Constrains<F: PrimeField> {
-    domain: Radix2EvaluationDomain<F>,
+    pub domain: Radix2EvaluationDomain<F>,
     trace_polys: Vec<DensePolynomial<F>>,
     boundary_constrains: Vec<DensePolynomial<F>>,
     transition_constrains: Vec<DensePolynomial<F>>,

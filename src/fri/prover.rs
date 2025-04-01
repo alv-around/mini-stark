@@ -57,7 +57,7 @@ where
         self.rounds[0].commit.root()
     }
 
-    pub fn prove(mut self) -> FriProof<D, F> {
+    pub fn prove(mut self) -> (FriProof<D, F>, Vec<u8>) {
         self.commit_phase();
         self.query_phase().unwrap()
     }
@@ -89,7 +89,7 @@ where
         commits
     }
 
-    pub fn query_phase(&mut self) -> Result<FriProof<D, F>, &str> {
+    pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), &str> {
         let mut beta = [0u8; 8]; // usize is 64-bits
         self.transcript.fill_challenge_bytes(&mut beta).unwrap();
         let mut beta = usize::from_le_bytes(beta);
@@ -145,12 +145,14 @@ where
             println!("another round achieved");
         }
 
-        Ok(FriProof {
-            transcript: self.transcript.transcript().to_vec(),
-            points,
-            queries,
-            quotients,
-        })
+        Ok((
+            FriProof {
+                points,
+                queries,
+                quotients,
+            },
+            self.transcript.transcript().to_vec(),
+        ))
     }
 
     fn calculate_vanishing_poly(roots: &[F]) -> DensePolynomial<F> {

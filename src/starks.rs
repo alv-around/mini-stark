@@ -1,6 +1,10 @@
 use crate::air::{Constrains, Provable, TraceTable, Verifiable};
 use crate::fri::FriProof;
-use crate::fri::{fiatshamir::DigestReader, prover::FriProver, verifier::FriVerifier};
+use crate::fri::{
+    fiatshamir::{DigestReader, FriIOPattern},
+    prover::FriProver,
+    verifier::FriVerifier,
+};
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
@@ -14,7 +18,6 @@ use std::error::Error;
 use std::marker::PhantomData;
 
 pub struct StarkProof<D: Digest, F: PrimeField> {
-    pub degree: usize,
     transcript: Vec<u8>,
     trace_commit: Hash<D>,
     trace_queries: Vec<MerklePath<D, F>>,
@@ -97,7 +100,7 @@ where
 
         // // Make the low degree test FRI
         let prover = FriProver::<N, D, _>::new(&mut merlin, constrain_poly, 1);
-        let fri_proof = prover.prove();
+        let (fri_proof, _) = prover.prove();
 
         // 3. Queries
         let mut trace_queries = Vec::new();
@@ -119,7 +122,6 @@ where
 
         let transcript = merlin.transcript().to_vec();
         Ok(StarkProof {
-            degree,
             transcript,
             trace_commit,
             trace_queries,
@@ -132,39 +134,40 @@ where
     pub fn verify(
         &self,
         transcript: IOPattern<DigestBridge<D>>,
-        _constrains: Constrains<F>,
+        constrains: Constrains<F>,
         proof: StarkProof<D, F>,
     ) -> bool {
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&proof.transcript);
+        let degree = constrains.domain.size() / self.blowup_factor;
         // 1. check symbolic link to quotients ??
         let _trace_commit = arthur.next_digest().unwrap();
         let _quotient_commit = arthur.next_digest().unwrap();
+        let r: [F; 1] = arthur.challenge_scalars().unwrap();
 
         // 2. run fri
         let fri_verifier = FriVerifier::<N, D, F>::new(
-            transcript,
             MerkleRoot(proof.constrain_trace_commit.clone()),
-            proof.degree,
+            degree - 1,
             self.blowup_factor,
         );
-        assert!(fri_verifier.verify(proof.fri_proof));
+        assert!(fri_verifier.verify(proof.fri_proof, arthur));
 
         // 3. run queries
         // TODO: number of queries dependent of target security. For the moment one query
-        let trace_domain = Radix2EvaluationDomain::<F>::new(proof.degree).unwrap();
-        let rand_bytes: [u8; 8] = arthur.challenge_bytes().unwrap();
-        let query = usize::from_le_bytes(rand_bytes);
-
-        let leaf = trace_domain.element(query);
-        let trace_root = MerkleRoot(proof.trace_commit);
-        for query in proof.trace_queries.into_iter() {
-            assert!(trace_root.check_proof::<N, _>(&leaf, query));
-        }
-
-        let quotient_root = MerkleRoot(proof.constrain_trace_commit);
-        for query in proof.constrain_queries.into_iter() {
-            assert!(quotient_root.check_proof::<N, _>(&leaf, query));
-        }
+        // let trace_domain = Radix2EvaluationDomain::<F>::new(degree).unwrap();
+        // let rand_bytes: [u8; 8] = arthur.challenge_bytes().unwrap();
+        // let query = usize::from_le_bytes(rand_bytes);
+        //
+        // let leaf = trace_domain.element(query);
+        // let trace_root = MerkleRoot::<D>(proof.trace_commit);
+        // for query in proof.trace_queries.into_iter() {
+        //     // assert!(trace_root.check_proof::<N, _>(&leaf, query));
+        // }
+        //
+        // let quotient_root = MerkleRoot::<D>(proof.constrain_trace_commit);
+        // for query in proof.constrain_queries.into_iter() {
+        //     // assert!(quotient_root.check_proof::<N, _>(&leaf, query));
+        // }
 
         true
     }

@@ -104,15 +104,14 @@ fn test_fibonacci_air_constrains() {
 fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
-    let _constrains = claim.derive_constrains(&trace);
+    let constrains = claim.derive_constrains(&trace);
 
     let io: IOPattern<DigestBridge<Sha256>> = StarkIOPattern::<_, Goldilocks>::new_stark(3, "🐺");
     let transcript = io.to_merlin();
 
     let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2usize);
     let proof = proof_system.prove(transcript, claim, witness).unwrap();
-    assert_eq!(proof.degree, 8);
 
-    // let is_alright = proof_system.verify(io, constrains, proof);
-    // assert!(is_alright);
+    let is_alright = proof_system.verify(io, constrains, proof);
+    assert!(is_alright);
 }

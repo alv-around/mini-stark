@@ -21,7 +21,6 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
-    transcript: IOPattern<DigestBridge<D>>,
     degree: usize,
     domain_size: usize,
     blowup_factor: usize,
@@ -35,17 +34,11 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
-    pub fn new(
-        transcript: IOPattern<DigestBridge<D>>,
-        commit: MerkleRoot<D>,
-        degree: usize,
-        blowup_factor: usize,
-    ) -> Self {
+    pub fn new(commit: MerkleRoot<D>, degree: usize, blowup_factor: usize) -> Self {
         let domain_size = 1 << ceil_log2_k::<TREE_WIDTH>((degree + 1) * blowup_factor);
         let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap();
 
         Self {
-            transcript,
             degree,
             rounds,
             domain_size,
@@ -57,16 +50,16 @@ where
 
     pub fn read_proof_transcript(
         &self,
-        transcript: Vec<u8>,
+        mut arthur: Arthur<'_, DigestBridge<D>, u8>,
     ) -> Result<Transcript<D, F>, IOPatternError> {
-        let mut arthur: Arthur<'_, DigestBridge<D>, u8> = self.transcript.to_arthur(&transcript);
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
 
-        for _ in 0..self.rounds - 1 {
+        for i in 0..self.rounds - 1 {
             let digest = arthur.next_digest().unwrap();
             commits.push(MerkleRoot(digest));
 
+            println!("round: {}", i);
             let alpha: [F; 1] = arthur.challenge_scalars().unwrap();
             alphas.push(alpha[0]);
         }
@@ -83,9 +76,8 @@ where
         Ok(Transcript(commits, alphas, beta))
     }
 
-    pub fn verify(&self, proof: FriProof<D, F>) -> bool {
-        let Transcript(commits, alphas, beta) =
-            self.read_proof_transcript(proof.transcript).unwrap();
+    pub fn verify(&self, proof: FriProof<D, F>, arthur: Arthur<'_, DigestBridge<D>, u8>) -> bool {
+        let Transcript(commits, alphas, beta) = self.read_proof_transcript(arthur).unwrap();
         assert_eq!(1 << commits.len(), (self.degree + 1) * self.blowup_factor);
         assert_eq!(commits[0].0, self.commit.0);
         if commits.len() != self.rounds || commits.len() - 1 != proof.points.len() {
@@ -160,14 +152,8 @@ mod test {
             196, 120, 254, 173, 12, 137, 183, 149, 64, 99, 143, 132, 76, 136, 25, 217, 164, 40, 23,
             99, 175, 146, 114, 199, 243, 150, 135, 118, 182, 5, 35, 69,
         ]);
-        let transcript: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
-        let verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
-            transcript,
-            MerkleRoot(hash),
-            degree,
-            blowup_factor,
-        );
+        let verifier =
+            FriVerifier::<TWO, Sha256, Goldilocks>::new(MerkleRoot(hash), degree, blowup_factor);
         assert_eq!(verifier.rounds, 3);
     }
 }

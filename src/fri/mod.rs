@@ -8,7 +8,7 @@ use digest::Digest;
 
 #[derive(Clone)]
 pub struct FriProof<D: Digest, F: PrimeField> {
-    transcript: Vec<u8>,
+    // transcript: Vec<u8>,
     points: Vec<[(F, F); 3]>,
     queries: Vec<[MerklePath<D, F>; 3]>,
     quotients: Vec<Vec<F>>,
@@ -42,13 +42,11 @@ mod test {
 
         let commit = fri_prover.get_initial_commit();
 
-        let proof = fri_prover.prove();
-        let verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
-            io,
-            MerkleRoot(commit),
-            degree,
-            blowup_factor,
-        );
-        assert!(verifier.verify(proof));
+        let (proof, transcript) = fri_prover.prove();
+        let verifier =
+            FriVerifier::<TWO, Sha256, Goldilocks>::new(MerkleRoot(commit), degree, blowup_factor);
+
+        let arthur = io.to_arthur(&transcript);
+        assert!(verifier.verify(proof, arthur));
     }
 }
