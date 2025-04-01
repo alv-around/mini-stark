@@ -19,6 +19,7 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     trace_commit: Hash<D>,
     trace_queries: Vec<MerklePath<D, F>>,
     constrain_trace_commit: Hash<D>,
+    constrain_queries: Vec<MerklePath<D, F>>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -50,9 +51,9 @@ where
         let trace = air.trace(&witness);
         let degree = trace.len();
         let lde_domain_size = self.blowup_factor * degree;
-        let mut lde_trace = TraceTable::<F>::new(lde_domain_size, trace.width());
 
         // TODO: add the coset trick to add zk
+        let mut lde_trace = TraceTable::<F>::new(lde_domain_size, trace.width());
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size).unwrap();
         let column_polys = trace.interpolate_col_polys();
         for (i, poly) in column_polys.get_trace_polynomials().into_iter().enumerate() {
@@ -74,7 +75,8 @@ where
             let constrain_lde = constrain.evaluate_over_domain(lde_domain);
             constrain_trace.add_col(i, constrain_lde.evals);
         }
-        let constrain_trace_commit = MerkleTree::<N, D, F>::new(constrain_trace.get_data()).root();
+        let constrain_codeword = MerkleTree::<N, D, F>::new(constrain_trace.get_data());
+        let constrain_trace_commit = constrain_codeword.root();
         merlin.add_bytes(&constrain_trace_commit).unwrap();
 
         // // compute the validity polynomial and commit it
@@ -99,11 +101,21 @@ where
 
         // 3. Queries
         let mut trace_queries = Vec::new();
-        let rand_bytes: [u8; 8] = merlin.challenge_bytes().unwrap();
-        let query = usize::from_le_bytes(rand_bytes);
-        let leaf = lde_domain.element(query);
-        // let path = trace_codeword.generate_proof(&leaf).unwrap();
-        // trace_queries.push(path);
+        let mut constrain_queries = Vec::new();
+        {
+            let rand_bytes: [u8; 8] = merlin.challenge_bytes().unwrap();
+            let query = usize::from_le_bytes(rand_bytes) % lde_domain_size;
+
+            // trace queries
+            let leaf = lde_trace.get_value(query, 0);
+            let path = trace_codeword.generate_proof(leaf).unwrap();
+            trace_queries.push(path);
+
+            // quotients queries
+            let leaf = constrain_trace.get_value(query, 0);
+            let path = constrain_codeword.generate_proof(leaf).unwrap();
+            constrain_queries.push(path);
+        }
 
         let transcript = merlin.transcript().to_vec();
         Ok(StarkProof {
@@ -112,6 +124,7 @@ where
             trace_commit,
             trace_queries,
             constrain_trace_commit,
+            constrain_queries,
             fri_proof,
         })
     }
@@ -130,7 +143,7 @@ where
         // 2. run fri
         let fri_verifier = FriVerifier::<N, D, F>::new(
             transcript,
-            MerkleRoot(proof.constrain_trace_commit),
+            MerkleRoot(proof.constrain_trace_commit.clone()),
             proof.degree,
             self.blowup_factor,
         );
@@ -143,10 +156,15 @@ where
         let query = usize::from_le_bytes(rand_bytes);
 
         let leaf = trace_domain.element(query);
-        // let trace_root = MerkleRoot(proof.trace_commit);
-        // for query in proof.trace_queries.into_iter() {
-        //     assert!(trace_root.check_proof::<N, _>(&leaf, query));
-        // }
+        let trace_root = MerkleRoot(proof.trace_commit);
+        for query in proof.trace_queries.into_iter() {
+            assert!(trace_root.check_proof::<N, _>(&leaf, query));
+        }
+
+        let quotient_root = MerkleRoot(proof.constrain_trace_commit);
+        for query in proof.constrain_queries.into_iter() {
+            assert!(quotient_root.check_proof::<N, _>(&leaf, query));
+        }
 
         true
     }
