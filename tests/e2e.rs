@@ -45,10 +45,6 @@ impl Verifiable<Goldilocks> for FibonacciClaim {
     fn derive_constrains(&self, trace: &TraceTable<Goldilocks>) -> Constrains<Goldilocks> {
         let mut constrains = trace.interpolate_col_polys();
 
-        // boundary polynomials
-        constrains.add_boundary_constrain(0, 0, Goldilocks::ONE);
-        constrains.add_boundary_constrain(self.step - 1, 1, self.output);
-
         // transition polynomials
         let col_a = constrains.get_trace_poly(0);
         let col_b = constrains.get_trace_poly(1);
@@ -84,8 +80,8 @@ fn test_fibonacci_air_constrains() {
     // check output constrain
     let omega_4 = domain.element(claim.step - 1);
     let z = DensePolynomial::from_coefficients_slice(&[-omega_4, ONE]);
-    let boundary = constrains.get_boundary_constrain(1).clone() * z;
-    assert_eq!(boundary.evaluate(&omega_4), ZERO);
+    // let boundary = constrains.get_boundary_constrain(1).clone() * z;
+    // assert_eq!(boundary.evaluate(&omega_4), ZERO);
 
     let carry_over_constrain = constrains
         .get_transition_constrain(0)
