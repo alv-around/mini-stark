@@ -10,7 +10,7 @@ use ark_std::test_rng;
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
 use nimue::plugins::ark::FieldChallenges;
-use nimue::{Arthur, ByteChallenges, DigestBridge, IOPattern, IOPatternError};
+use nimue::{Arthur, ByteChallenges, DigestBridge, IOPatternError};
 use std::iter::zip;
 use std::marker::PhantomData;
 
@@ -134,7 +134,6 @@ where
 mod test {
     use super::*;
     use crate::field::Goldilocks;
-    use crate::fri::fiatshamir::FriIOPattern;
     use crate::Hash;
     use ark_poly::univariate::DensePolynomial;
     use ark_poly::{DenseUVPolynomial, Polynomial};

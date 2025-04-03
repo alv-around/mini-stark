@@ -29,6 +29,11 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
         // initial state
         let mut a = ONE;
         let mut b = witness.secret_b;
+
+        // set initial state constrains
+        trace.add_boundary_constrain(0, 0);
+        trace.add_boundary_constrain(0, 1);
+
         // trace
         for i in 0..trace.len() {
             let c = a + b;
@@ -37,25 +42,21 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
             b = c;
         }
 
+        // set output constrains
+        trace.add_boundary_constrain(self.step - 1, 1);
+
+        // add transition constrains
+        trace.add_transition_constrain(Box::new(move |trace_polys| {
+            trace_polys[0].clone()
+                * DensePolynomial::from_coefficients_vec(vec![trace.omega.clone()])
+                - trace_polys[1].clone()
+        }));
+        trace.add_transition_constrain(Box::new(move |trace_polys| {
+            trace_polys[1].clone() * trace.omega.clone()
+                - (trace_polys[0].clone() + trace_polys[1].clone())
+        }));
+
         trace
-    }
-}
-
-impl Verifiable<Goldilocks> for FibonacciClaim {
-    fn derive_constrains(&self, trace: &TraceTable<Goldilocks>) -> Constrains<Goldilocks> {
-        let mut constrains = trace.interpolate_col_polys();
-
-        // transition polynomials
-        let col_a = constrains.get_trace_poly(0);
-        let col_b = constrains.get_trace_poly(1);
-        let omega = DensePolynomial::from_coefficients_slice(&[constrains.get_domain().element(1)]);
-
-        let carry_over_poly = col_a.clone() * omega.clone() - col_b.clone();
-        let sum_poly = col_b.clone() * omega - (col_a + col_b);
-        constrains.add_transition_constrain(carry_over_poly);
-        constrains.add_transition_constrain(sum_poly);
-
-        constrains
     }
 }
 
@@ -74,7 +75,7 @@ fn test_setup() -> (Witness, FibonacciClaim) {
 fn test_fibonacci_air_constrains() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
-    let constrains = claim.derive_constrains(&trace);
+    let constrains = trace.derive_constrains();
     let domain = constrains.get_domain();
 
     // check output constrain
@@ -84,10 +85,10 @@ fn test_fibonacci_air_constrains() {
     // assert_eq!(boundary.evaluate(&omega_4), ZERO);
 
     let carry_over_constrain = constrains
-        .get_transition_constrain(0)
+        .get_constrain_poly(2)
         .mul_by_vanishing_poly(domain);
     let sum_constrain = constrains
-        .get_transition_constrain(1)
+        .get_constrain_poly(3)
         .mul_by_vanishing_poly(domain);
     for i in 0..trace.len() - 1 {
         let w_i = domain.element(i);
@@ -100,7 +101,7 @@ fn test_fibonacci_air_constrains() {
 fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
-    let constrains = claim.derive_constrains(&trace);
+    let constrains = trace.derive_constrains();
 
     let io: IOPattern<DigestBridge<Sha256>> = StarkIOPattern::<_, Goldilocks>::new_stark(3, "🐺");
     let transcript = io.to_merlin();

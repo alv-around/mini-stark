@@ -1,10 +1,6 @@
-use crate::air::{Constrains, Provable, TraceTable, Verifiable};
+use crate::air::{Constrains, Provable, TraceTable};
 use crate::fri::FriProof;
-use crate::fri::{
-    fiatshamir::{DigestReader, FriIOPattern},
-    prover::FriProver,
-    verifier::FriVerifier,
-};
+use crate::fri::{fiatshamir::DigestReader, prover::FriProver, verifier::FriVerifier};
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
@@ -44,62 +40,49 @@ where
             digest: PhantomData,
         }
     }
-    pub fn prove<T, AIR: Provable<T, F> + Verifiable<F>>(
+    pub fn prove<T, AIR: Provable<T, F>>(
         &self,
         mut merlin: Merlin<DigestBridge<D>>,
         air: AIR,
         witness: T,
     ) -> Result<StarkProof<D, F>, Box<dyn Error>> {
-        // // compute the lde of the trace & commit to it
+        // 1. compute trace polys and commit to them
         let trace = air.trace(&witness);
-        let degree = trace.len();
-        let lde_domain_size = self.blowup_factor * degree;
-
-        // TODO: add the coset trick to add zk
-        let mut lde_trace = TraceTable::<F>::new(lde_domain_size, trace.width());
-        let lde_domain = Radix2EvaluationDomain::new(lde_domain_size).unwrap();
-        let column_polys = trace.interpolate_col_polys();
-        for (i, poly) in column_polys.get_trace_polynomials().into_iter().enumerate() {
-            let lde_column_poly = poly.evaluate_over_domain(lde_domain);
-            lde_trace.add_col(i, lde_column_poly.evals);
+        let trace_polys = trace.get_trace_polys();
+        let mut trace_poly_coeffs = TraceTable::<F>::new(trace.len(), trace.width());
+        for (i, poly) in trace_polys.iter().enumerate() {
+            trace_poly_coeffs.add_col(i, poly.coeffs.clone());
         }
-        let trace_codeword = MerkleTree::<N, D, F>::new(lde_trace.get_data());
+        let trace_codeword = MerkleTree::<N, D, F>::new(trace_poly_coeffs.get_data());
         let trace_commit = trace_codeword.root();
-        // TODO: add claim's to transcript
-        // merlin.add_bytes(&claim);
         merlin.add_bytes(&trace_commit).unwrap();
 
-        // provide trace auth paths
-
-        // // compute the constrain lde trace  and commit to it
-        let constrains = air.derive_constrains(&trace);
-        let mut constrain_trace = TraceTable::<F>::new(lde_domain_size, constrains.len());
-        for (i, constrain) in constrains.enumerate() {
-            let constrain_lde = constrain.evaluate_over_domain(lde_domain);
-            constrain_trace.add_col(i, constrain_lde.evals);
+        // TODO: add the coset trick to add zk
+        let lde_domain_size = self.blowup_factor * trace.len();
+        let lde_domain = Radix2EvaluationDomain::new(lde_domain_size).unwrap();
+        let constrains = trace.derive_constrains();
+        let mut constrain_trace = TraceTable::<F>::new(lde_domain_size, trace_polys.len());
+        for (i, poly) in constrains.get_polynomials().into_iter().enumerate() {
+            let evals = poly.evaluate_over_domain(lde_domain);
+            constrain_trace.add_col(i, evals.evals);
         }
-        let constrain_codeword = MerkleTree::<N, D, F>::new(constrain_trace.get_data());
-        let constrain_trace_commit = constrain_codeword.root();
+        let constrain_trace_codeword = MerkleTree::<N, D, F>::new(constrain_trace.get_data());
+        let constrain_trace_commit = constrain_trace_codeword.root();
         merlin.add_bytes(&constrain_trace_commit).unwrap();
 
-        // // compute the validity polynomial and commit it
+        // Till here good!
+
         // parametric batching g = f_0 + r f_1 + r^2 f_2 + .. + r^(n-1) f_{n-1}
         let r: [F; 1] = merlin.challenge_scalars().unwrap();
-        let mut constrain_poly = DensePolynomial::<_>::from_coefficients_vec(vec![F::ZERO]);
-        for i in 0..trace.width() {
-            let trace_poly = column_polys.get_trace_poly(i);
-            constrain_poly = constrain_poly
+        let mut mixed_constrain_poly = DensePolynomial::<_>::from_coefficients_vec(vec![F::ZERO]);
+        for (i, constrain_poly) in constrains.get_polynomials().iter().enumerate() {
+            mixed_constrain_poly = mixed_constrain_poly
                 + DensePolynomial::<_>::from_coefficients_vec(vec![r[0].pow([i as u64])])
-                    * trace_poly;
+                    * constrain_poly;
         }
 
-        let _validity_poly = constrain_poly
-            .clone()
-            .evaluate_over_domain(lde_domain)
-            .evals;
-
         // // Make the low degree test FRI
-        let prover = FriProver::<N, D, _>::new(&mut merlin, constrain_poly, 1);
+        let prover = FriProver::<N, D, _>::new(&mut merlin, mixed_constrain_poly, 1);
         let (fri_proof, _) = prover.prove();
 
         // 3. Queries
@@ -110,13 +93,13 @@ where
             let query = usize::from_le_bytes(rand_bytes) % lde_domain_size;
 
             // trace queries
-            let leaf = lde_trace.get_value(query, 0);
+            let leaf = constrain_trace.get_value(query, 0);
             let path = trace_codeword.generate_proof(leaf).unwrap();
             trace_queries.push(path);
 
             // quotients queries
             let leaf = constrain_trace.get_value(query, 0);
-            let path = constrain_codeword.generate_proof(leaf).unwrap();
+            let path = constrain_trace_codeword.generate_proof(leaf).unwrap();
             constrain_queries.push(path);
         }
 
