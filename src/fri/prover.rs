@@ -38,6 +38,7 @@ where
         let round_num = domain.log_size_of_group as usize;
 
         // degree padding
+        println!("FRI: domain:{}, d: {}", domain_size, d);
         let power_offset = domain_size - d - 1;
         let x_power = SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
         let poly_offset = DensePolynomial::from(x_power).naive_mul(&poly) + poly;

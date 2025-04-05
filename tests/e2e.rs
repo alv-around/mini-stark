@@ -47,13 +47,11 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
 
         // add transition constrains
         trace.add_transition_constrain(Box::new(move |trace_polys| {
-            trace_polys[0].clone()
-                * DensePolynomial::from_coefficients_vec(vec![trace.omega.clone()])
+            trace_polys[0].clone() * DensePolynomial::from_coefficients_vec(vec![trace.omega])
                 - trace_polys[1].clone()
         }));
         trace.add_transition_constrain(Box::new(move |trace_polys| {
-            trace_polys[1].clone() * trace.omega.clone()
-                - (trace_polys[0].clone() + trace_polys[1].clone())
+            trace_polys[1].clone() * trace.omega - (trace_polys[0].clone() + trace_polys[1].clone())
         }));
 
         trace
@@ -103,7 +101,7 @@ fn test_stark_prover() {
     let trace = claim.trace(&witness);
     let constrains = trace.derive_constrains();
 
-    let io: IOPattern<DigestBridge<Sha256>> = StarkIOPattern::<_, Goldilocks>::new_stark(3, "🐺");
+    let io: IOPattern<DigestBridge<Sha256>> = StarkIOPattern::<_, Goldilocks>::new_stark(4, "🐺");
     let transcript = io.to_merlin();
 
     let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2usize);

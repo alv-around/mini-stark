@@ -16,9 +16,10 @@ use std::marker::PhantomData;
 pub struct StarkProof<D: Digest, F: PrimeField> {
     transcript: Vec<u8>,
     trace_commit: Hash<D>,
-    trace_queries: Vec<MerklePath<D, F>>,
     constrain_trace_commit: Hash<D>,
     constrain_queries: Vec<MerklePath<D, F>>,
+    mixed_constrain_commit: Hash<D>,
+    mixed_constrain_queries: Vec<MerklePath<D, F>>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -61,7 +62,7 @@ where
         let lde_domain_size = self.blowup_factor * trace.len();
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size).unwrap();
         let constrains = trace.derive_constrains();
-        let mut constrain_trace = TraceTable::<F>::new(lde_domain_size, trace_polys.len());
+        let mut constrain_trace = TraceTable::<F>::new(lde_domain_size, constrains.len());
         for (i, poly) in constrains.get_polynomials().into_iter().enumerate() {
             let evals = poly.evaluate_over_domain(lde_domain);
             constrain_trace.add_col(i, evals.evals);
@@ -69,8 +70,6 @@ where
         let constrain_trace_codeword = MerkleTree::<N, D, F>::new(constrain_trace.get_data());
         let constrain_trace_commit = constrain_trace_codeword.root();
         merlin.add_bytes(&constrain_trace_commit).unwrap();
-
-        // Till here good!
 
         // parametric batching g = f_0 + r f_1 + r^2 f_2 + .. + r^(n-1) f_{n-1}
         let r: [F; 1] = merlin.challenge_scalars().unwrap();
@@ -80,36 +79,48 @@ where
                 + DensePolynomial::<_>::from_coefficients_vec(vec![r[0].pow([i as u64])])
                     * constrain_poly;
         }
+        let mixed_constrain_lde = mixed_constrain_poly
+            .clone()
+            .evaluate_over_domain(lde_domain);
+        let mut mixed_constrain_trace = TraceTable::<F>::new(lde_domain_size, 1);
+        mixed_constrain_trace.add_col(0, mixed_constrain_lde.evals);
+        let mixed_constrain_codeword = MerkleTree::<N, D, F>::new(mixed_constrain_trace.get_data());
+        let mixed_constrain_commit = mixed_constrain_codeword.root();
 
+        // till here all good
         // // Make the low degree test FRI
-        let prover = FriProver::<N, D, _>::new(&mut merlin, mixed_constrain_poly, 1);
+        let prover =
+            FriProver::<N, D, _>::new(&mut merlin, mixed_constrain_poly, self.blowup_factor);
         let (fri_proof, _) = prover.prove();
 
         // 3. Queries
-        let mut trace_queries = Vec::new();
         let mut constrain_queries = Vec::new();
+        let mut mixed_constrain_queries = Vec::new();
         {
             let rand_bytes: [u8; 8] = merlin.challenge_bytes().unwrap();
             let query = usize::from_le_bytes(rand_bytes) % lde_domain_size;
 
-            // trace queries
-            let leaf = constrain_trace.get_value(query, 0);
-            let path = trace_codeword.generate_proof(leaf).unwrap();
-            trace_queries.push(path);
+            // constrain queries
+            for i in 0..constrains.len() {
+                let leaf = constrain_trace.get_value(query, i);
+                let path = trace_codeword.generate_proof(leaf).unwrap();
+                constrain_queries.push(path);
+            }
 
-            // quotients queries
-            let leaf = constrain_trace.get_value(query, 0);
-            let path = constrain_trace_codeword.generate_proof(leaf).unwrap();
-            constrain_queries.push(path);
+            // validity query
+            let leaf = mixed_constrain_trace.get_value(query, 0);
+            let path = mixed_constrain_codeword.generate_proof(leaf).unwrap();
+            mixed_constrain_queries.push(path);
         }
 
         let transcript = merlin.transcript().to_vec();
         Ok(StarkProof {
             transcript,
             trace_commit,
-            trace_queries,
             constrain_trace_commit,
             constrain_queries,
+            mixed_constrain_commit,
+            mixed_constrain_queries,
             fri_proof,
         })
     }
