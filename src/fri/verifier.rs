@@ -50,7 +50,7 @@ where
 
     pub fn read_proof_transcript(
         &self,
-        mut arthur: Arthur<'_, DigestBridge<D>, u8>,
+        arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
     ) -> Result<Transcript<D, F>, IOPatternError> {
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
@@ -76,7 +76,11 @@ where
         Ok(Transcript(commits, alphas, beta))
     }
 
-    pub fn verify(&self, proof: FriProof<D, F>, arthur: Arthur<'_, DigestBridge<D>, u8>) -> bool {
+    pub fn verify(
+        &self,
+        proof: FriProof<D, F>,
+        arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
+    ) -> bool {
         let Transcript(commits, alphas, beta) = self.read_proof_transcript(arthur).unwrap();
         assert_eq!(1 << commits.len(), (self.degree + 1) * self.blowup_factor);
         assert_eq!(commits[0].0, self.commit.0);

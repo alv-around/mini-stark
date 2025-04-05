@@ -46,7 +46,7 @@ mod test {
         let verifier =
             FriVerifier::<TWO, Sha256, Goldilocks>::new(MerkleRoot(commit), degree, blowup_factor);
 
-        let arthur = io.to_arthur(&transcript);
-        assert!(verifier.verify(proof, arthur));
+        let mut arthur = io.to_arthur(&transcript);
+        assert!(verifier.verify(proof, &mut arthur));
     }
 }
