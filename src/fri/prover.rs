@@ -1,5 +1,5 @@
 use super::FriProof;
-use crate::merkle::{MerkleTree, Tree};
+use crate::merkle::{MerklePath, MerkleTree, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -12,23 +12,23 @@ use nimue::plugins::ark::FieldChallenges;
 use nimue::DigestBridge;
 use nimue::{ByteChallenges, ByteWriter, Merlin};
 
-pub struct FriProver<const TREE_WIDH: usize, D: Digest, F: PrimeField>
+pub struct FriProver<'a, const TREE_WIDH: usize, D: Digest, F: PrimeField>
 where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
     round_num: usize,
-    transcript: Merlin<DigestBridge<D>>,
+    transcript: &'a mut Merlin<DigestBridge<D>>,
     rounds: Vec<FriRound<TREE_WIDH, D, F>>,
 }
 
-impl<const W: usize, D, F> FriProver<W, D, F>
+impl<'a, const W: usize, D, F> FriProver<'a, W, D, F>
 where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
     pub fn new(
-        transcript: Merlin<DigestBridge<D>>,
+        transcript: &'a mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
         blowup_factor: usize,
     ) -> Self {
@@ -38,9 +38,16 @@ where
         let round_num = domain.log_size_of_group as usize;
 
         // degree padding
-        let power_offset = domain_size - d - 1;
-        let x_power = SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
-        let poly_offset = DensePolynomial::from(x_power).naive_mul(&poly) + poly;
+        println!("FRI: domain:{}, d: {}", domain_size, d);
+        let power_offset = (domain_size / blowup_factor) - d;
+        let mut poly_offset = poly;
+        if power_offset > 0 {
+            let x_power =
+                SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
+            let shift = DensePolynomial::from(x_power).naive_mul(&poly_offset);
+            poly_offset = poly_offset + shift;
+            println!("FRI: degree padding performed");
+        }
 
         let mut rounds = Vec::<FriRound<W, D, F>>::with_capacity(round_num);
         let first_round = FriRound::new(poly_offset, domain_size);
@@ -53,11 +60,7 @@ where
         }
     }
 
-    pub fn get_initial_commit(&self) -> Hash<D> {
-        self.rounds[0].commit.root()
-    }
-
-    pub fn prove(&mut self) -> FriProof<D, F> {
+    pub fn prove(mut self) -> (FriProof<D, F>, Vec<u8>) {
         self.commit_phase();
         self.query_phase().unwrap()
     }
@@ -72,12 +75,14 @@ where
             self.transcript.add_bytes(&commit).unwrap();
             commits.push(commit);
 
-            let mut alpha = [F::ZERO; 1];
-            self.transcript.fill_challenge_scalars(&mut alpha).unwrap();
+            let alpha: [F; 1] = self.transcript.challenge_scalars().unwrap();
             let folded_poly =
                 FriRound::<W, D, _>::split_and_fold(&previous_round.poly.clone(), alpha[0]);
             let domain_size = folded_poly.degree() + 1;
 
+            println!("previous poly round coeffs: {:?}", previous_round.poly);
+            println!("foded poly coeffs: {:?}", folded_poly);
+            println!("folded poly degree:{}", folded_poly.degree());
             let round = FriRound::<W, D, _>::new(folded_poly, domain_size);
             self.rounds.push(round);
         }
@@ -90,7 +95,7 @@ where
         commits
     }
 
-    pub fn query_phase(&mut self) -> Result<FriProof<D, F>, &str> {
+    pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), &str> {
         let mut beta = [0u8; 8]; // usize is 64-bits
         self.transcript.fill_challenge_bytes(&mut beta).unwrap();
         let mut beta = usize::from_le_bytes(beta);
@@ -136,8 +141,7 @@ where
             // merkle commits
             let proof1 = previous_commit.generate_proof(&y1).unwrap();
             let proof2 = previous_commit.generate_proof(&y2).unwrap();
-            let proof3 = round.commit.generate_proof(&y3).unwrap();
-            queries.push([proof1, proof2, proof3]);
+            queries.push([proof1, proof2]);
 
             previous_poly = &round.poly;
             previous_commit = &round.commit;
@@ -146,12 +150,26 @@ where
             println!("another round achieved");
         }
 
-        Ok(FriProof {
-            transcript: self.transcript.transcript(),
-            points,
-            queries,
-            quotients,
-        })
+        Ok((
+            FriProof {
+                points,
+                queries,
+                quotients,
+            },
+            self.transcript.transcript().to_vec(),
+        ))
+    }
+
+    pub fn get_initial_commit(&self) -> Hash<D> {
+        self.rounds[0].commit.root()
+    }
+
+    pub fn query_first_commit(&self, query: usize) -> (F, MerklePath<D, F>) {
+        let initial_commit = self.rounds[0].clone();
+        let x = initial_commit.domain.element(query);
+        let leaf = initial_commit.poly.evaluate(&x);
+        let path = initial_commit.commit.generate_proof(&leaf).unwrap();
+        (leaf, path)
     }
 
     fn calculate_vanishing_poly(roots: &[F]) -> DensePolynomial<F> {
@@ -163,6 +181,7 @@ where
     }
 }
 
+#[derive(Clone)]
 struct FriRound<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     poly: DensePolynomial<F>,
     commit: MerkleTree<TREE_WIDH, D, F>,
@@ -228,10 +247,10 @@ mod test {
         let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let transcript: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let io: IOPattern<DigestBridge<Sha256>> = FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let mut transcript = io.to_merlin();
 
-        let mut fri = FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
+        let fri = FriProver::<TWO, Sha256, _>::new(&mut transcript, poly, blowup_factor);
         assert_eq!(fri.round_num, 3);
 
         let _proof = fri.prove();

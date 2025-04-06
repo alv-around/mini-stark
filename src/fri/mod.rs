@@ -6,10 +6,11 @@ use crate::merkle::MerklePath;
 use ark_ff::PrimeField;
 use digest::Digest;
 
-pub struct FriProof<'a, D: Digest, F: PrimeField> {
-    transcript: &'a [u8],
+#[derive(Clone)]
+pub struct FriProof<D: Digest, F: PrimeField> {
+    // transcript: Vec<u8>,
     points: Vec<[(F, F); 3]>,
-    queries: Vec<[MerklePath<D, F>; 3]>,
+    queries: Vec<[MerklePath<D, F>; 2]>,
     quotients: Vec<Vec<F>>,
 }
 
@@ -34,20 +35,18 @@ mod test {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let degree = poly.degree();
-        let transcript: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
-        let mut fri_prover =
-            FriProver::<TWO, Sha256, _>::new(transcript.to_merlin(), poly, blowup_factor);
+        let io: IOPattern<DigestBridge<Sha256>> = FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let mut transcript = io.to_merlin();
+
+        let fri_prover = FriProver::<TWO, Sha256, _>::new(&mut transcript, poly, blowup_factor);
 
         let commit = fri_prover.get_initial_commit();
 
-        let proof = fri_prover.prove();
-        let verifier = FriVerifier::<TWO, Sha256, Goldilocks>::new(
-            transcript,
-            MerkleRoot(commit),
-            degree,
-            blowup_factor,
-        );
-        assert!(verifier.verify(proof));
+        let (proof, transcript) = fri_prover.prove();
+        let verifier =
+            FriVerifier::<TWO, Sha256, Goldilocks>::new(MerkleRoot(commit), degree, blowup_factor);
+
+        let mut arthur = io.to_arthur(&transcript);
+        assert!(verifier.verify(proof, &mut arthur));
     }
 }

@@ -1,39 +1,96 @@
 use crate::util::ceil_log2_k;
 use ark_ff::PrimeField;
-use ark_ff::Zero;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::EvaluationDomain;
-use ark_poly::Polynomial;
 
 const TWO: usize = 2;
 
-pub trait Provable<T, F: PrimeField> {
-    fn trace(&self, witness: T) -> TraceTable<F>;
-}
-
-pub trait Verifiable<F: PrimeField> {
-    fn derive_constrains(&self, trace: &TraceTable<F>) -> Constrains<F>;
+pub trait Provable<W, F: PrimeField> {
+    fn trace(&self, witness: &W) -> TraceTable<F>;
+    // fn derive_constrians(&self) -> Constrains<F>;
 }
 
 pub struct TraceTable<F: PrimeField> {
     depth: usize,
     width: usize,
+    pub omega: F,
+    boundaries: Vec<(usize, usize)>,
+    transition_constrains: Vec<Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>>,
     data: Vec<F>,
 }
 
 impl<F: PrimeField> TraceTable<F> {
     pub fn new(steps: usize, width: usize) -> Self {
-        // FIXME: adjust trace table length to what is given to STARK config
+        // TODO: add random padding for [steps, depth) rows
+        // TODO: replace ceil with domain::new
+        let boundaries = Vec::new();
         let depth = 1usize << ceil_log2_k::<TWO>(steps);
-        let data = Vec::<F>::with_capacity(depth * width);
-        Self { depth, width, data }
+        let capacity = depth * width;
+        let mut data = Vec::<F>::with_capacity(capacity);
+        let omega = Radix2EvaluationDomain::<F>::new(depth).unwrap().group_gen();
+        data.resize(capacity, F::ZERO);
+        Self {
+            depth,
+            width,
+            omega,
+            boundaries,
+            transition_constrains: Vec::new(),
+            data,
+        }
     }
 
-    pub fn add_row(&mut self, row: Vec<F>) {
+    pub fn get_data(&self) -> &[F] {
+        &self.data[..]
+    }
+
+    // compute trace polynomials
+    pub fn get_trace_polys(&self) -> Vec<DensePolynomial<F>> {
+        let domain = Radix2EvaluationDomain::<F>::new(self.len()).unwrap();
+        let trace_depth = self.len();
+        let trace_width = self.width();
+
+        let mut trace_polys = Vec::with_capacity(trace_width);
+        for i in 0..trace_width {
+            // derive trace polys
+            let evaluations = (0..trace_depth)
+                .map(|j| *self.get_value(j, i))
+                .collect::<Vec<_>>();
+            let coeffs = domain.ifft(&evaluations);
+            let column_poly = DensePolynomial::from_coefficients_vec(coeffs);
+            trace_polys.push(column_poly);
+        }
+
+        trace_polys
+    }
+
+    pub fn add_row(&mut self, index: usize, row: Vec<F>) {
         assert_eq!(row.len(), self.width);
-        self.data.extend(row);
+        assert!(index < self.depth);
+        for (j, val) in row.into_iter().enumerate() {
+            self.data[index * self.width + j] = val;
+        }
+    }
+
+    pub fn add_col(&mut self, index: usize, col: Vec<F>) {
+        assert_eq!(col.len(), self.depth);
+        assert!(index < self.width);
+        for (i, val) in col.into_iter().enumerate() {
+            self.data[i * self.width + index] = val;
+        }
+    }
+
+    pub fn add_boundary_constrain(&mut self, row: usize, col: usize) {
+        assert!(row < self.len() && col < self.width());
+        self.boundaries.push((row, col));
+    }
+
+    pub fn add_transition_constrain(
+        &mut self,
+        f: Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>,
+    ) {
+        self.transition_constrains.push(f);
     }
 
     pub fn get_value(&self, row: usize, col: usize) -> &F {
@@ -52,77 +109,52 @@ impl<F: PrimeField> TraceTable<F> {
     pub fn width(&self) -> usize {
         self.width
     }
+
+    pub fn derive_constrains(&self) -> Constrains<F> {
+        let domain = Radix2EvaluationDomain::<F>::new(self.len()).unwrap();
+        let mut constrains = self.get_trace_polys();
+
+        let transition_evals = self
+            .transition_constrains
+            .iter()
+            .map(|f| f(&constrains))
+            .collect::<Vec<_>>();
+
+        let trace_constrains = self.width();
+        let transition_constrains = transition_evals.len();
+        constrains.extend(transition_evals);
+        Constrains {
+            domain,
+            trace_constrains,
+            transition_constrains,
+            constrains,
+        }
+    }
 }
 
 pub struct Constrains<F: PrimeField> {
-    domain: Radix2EvaluationDomain<F>,
-    trace_polys: Vec<DensePolynomial<F>>,
+    pub domain: Radix2EvaluationDomain<F>,
+    trace_constrains: usize,
+    transition_constrains: usize,
     constrains: Vec<DensePolynomial<F>>,
 }
 
 impl<F: PrimeField> Constrains<F> {
-    pub fn new(trace: &TraceTable<F>) -> Self {
-        let (trace_polys, domain) = Self::interpolate_col_polys(trace);
-        let constrains = Vec::<DensePolynomial<F>>::new();
-        Self {
-            domain,
-            trace_polys,
-            constrains,
-        }
+    pub fn len(&self) -> usize {
+        self.constrains.len()
     }
 
-    pub fn get_trace_poly(&self, col: usize) -> DensePolynomial<F> {
-        self.trace_polys[col].clone()
+    pub fn get_constrain_poly(&self, col: usize) -> DensePolynomial<F> {
+        assert!(col < self.trace_constrains + self.transition_constrains);
+        self.constrains[col].clone()
+    }
+
+    pub fn get_polynomials(&self) -> Vec<DensePolynomial<F>> {
+        self.constrains.clone()
     }
 
     pub fn get_domain(&self) -> Radix2EvaluationDomain<F> {
         self.domain
-    }
-
-    pub fn get_constrain_number(&self) -> usize {
-        self.constrains.len()
-    }
-
-    pub fn get_constrain(&self, col: usize) -> &DensePolynomial<F> {
-        &self.constrains[col]
-    }
-
-    pub fn add_boundary_constrain(&mut self, row: usize, col: usize, value: F) {
-        let w_i = self.domain.element(row);
-        assert_eq!(self.trace_polys[col].evaluate(&w_i), value);
-        let root = DensePolynomial::from_coefficients_vec(vec![-w_i, F::ONE]);
-        let y = DensePolynomial::from_coefficients_slice(&[value]);
-        let poly = (self.trace_polys[col].clone() - y) / root;
-        self.constrains.push(poly);
-    }
-
-    pub fn add_transition_constrain(&mut self, poly: DensePolynomial<F>) {
-        let domain_size = self.domain.size();
-        let omega_n_minus_one = self.domain.element(domain_size - 1);
-        let last_row_poly =
-            DensePolynomial::from_coefficients_vec(vec![-omega_n_minus_one, F::ONE]);
-        let (rest, quotient) = poly.divide_by_vanishing_poly(self.domain);
-        assert_eq!(rest, DensePolynomial::zero());
-        self.constrains.push(quotient * last_row_poly);
-    }
-
-    fn interpolate_col_polys(
-        trace: &TraceTable<F>,
-    ) -> (Vec<DensePolynomial<F>>, Radix2EvaluationDomain<F>) {
-        let domain = Radix2EvaluationDomain::new(trace.len()).unwrap();
-        let trace_depth = trace.len();
-        let trace_width = trace.width();
-        let mut trace_polys = Vec::with_capacity(trace_width);
-
-        for i in 0..trace_width {
-            let coeffs = (0..trace_depth)
-                .map(|j| *trace.get_value(j, i))
-                .collect::<Vec<_>>();
-            let poly = domain.ifft(&coeffs);
-            trace_polys.push(DensePolynomial::from_coefficients_vec(poly));
-        }
-
-        (trace_polys, domain)
     }
 }
 
@@ -144,46 +176,40 @@ mod test {
     struct Witness;
 
     impl Provable<Witness, Goldilocks> for FibonacciClaim {
-        fn trace(&self, _witness: Witness) -> TraceTable<Goldilocks> {
+        fn trace(&self, _witness: &Witness) -> TraceTable<Goldilocks> {
             let trace_width = 2usize;
             let mut trace = TraceTable::new(self.step, trace_width);
 
             // initial state
             let mut a = ONE;
             let mut b = ONE;
+
+            // set initial state constrains
+            trace.add_boundary_constrain(0, 0);
+            trace.add_boundary_constrain(0, 1);
+
             // trace
-            for _ in 0..trace.len() {
+            for i in 0..trace.len() {
                 let c = a + b;
-                trace.add_row(vec![a, b]);
+                trace.add_row(i, vec![a, b]);
                 a = b;
                 b = c;
             }
 
+            // set output constrains
+            trace.add_boundary_constrain(self.step - 1, 1);
+
+            // add transition constrains
+            trace.add_transition_constrain(Box::new(move |trace_polys| {
+                trace_polys[0].clone() * DensePolynomial::from_coefficients_vec(vec![trace.omega])
+                    - trace_polys[1].clone()
+            }));
+            trace.add_transition_constrain(Box::new(move |trace_polys| {
+                trace_polys[1].clone() * trace.omega
+                    - (trace_polys[0].clone() + trace_polys[1].clone())
+            }));
+
             trace
-        }
-    }
-
-    impl Verifiable<Goldilocks> for FibonacciClaim {
-        fn derive_constrains(&self, trace: &TraceTable<Goldilocks>) -> Constrains<Goldilocks> {
-            let mut constrains = Constrains::new(trace);
-
-            // boundary polynomials
-            constrains.add_boundary_constrain(0, 0, ONE);
-            constrains.add_boundary_constrain(0, 1, ONE);
-            constrains.add_boundary_constrain(self.step - 1, 1, self.output);
-
-            // transition polynomials
-            let col_a = constrains.get_trace_poly(0);
-            let col_b = constrains.get_trace_poly(1);
-            let omega =
-                DensePolynomial::from_coefficients_slice(&[constrains.get_domain().element(1)]);
-
-            let carry_over_poly = col_a.clone() * omega.clone() - col_b.clone();
-            let sum_poly = col_b.clone() * omega - (col_a + col_b);
-            constrains.add_transition_constrain(carry_over_poly);
-            constrains.add_transition_constrain(sum_poly);
-
-            constrains
         }
     }
 
@@ -193,7 +219,7 @@ mod test {
             step: 3,
             output: Goldilocks::from(3),
         };
-        let trace = third_fibonacci.trace(Witness);
+        let trace = third_fibonacci.trace(&Witness);
         assert_eq!(trace.len(), 4);
         assert_eq!(trace.width(), 2);
         assert_eq!(*trace.get_value(0, 0), ONE);
@@ -210,7 +236,7 @@ mod test {
             step: 4,
             output: Goldilocks::from(5),
         };
-        let trace = fourth_fib.trace(Witness);
+        let trace = fourth_fib.trace(&Witness);
         assert_eq!(trace.len(), 4);
         assert_eq!(trace.width(), 2);
         assert_eq!(*trace.get_value(0, 1), ONE);
@@ -226,21 +252,15 @@ mod test {
             step: 3,
             output: Goldilocks::from(3),
         };
-        let trace = claim.trace(Witness);
-        let constrains = claim.derive_constrains(&trace);
-        let domain = constrains.get_domain();
+        let trace = claim.trace(&Witness);
+        let trace_polys = trace.get_trace_polys();
+        let domain = Radix2EvaluationDomain::<Goldilocks>::new(trace.len()).unwrap();
 
         // check trace polynomials are computed correctly
         for i in 0..claim.step {
             let row = domain.element(i);
-            assert_eq!(
-                *trace.get_value(i, 0),
-                constrains.get_trace_poly(0).evaluate(&row)
-            );
-            assert_eq!(
-                *trace.get_value(i, 1),
-                constrains.get_trace_poly(1).evaluate(&row)
-            );
+            assert_eq!(*trace.get_value(i, 0), trace_polys[0].evaluate(&row));
+            assert_eq!(*trace.get_value(i, 1), trace_polys[1].evaluate(&row));
         }
     }
 
@@ -250,24 +270,29 @@ mod test {
             step: 3,
             output: Goldilocks::from(3),
         };
-        let trace = claim.trace(Witness);
-        let constrains = claim.derive_constrains(&trace);
+        let trace = claim.trace(&Witness);
+        let constrains = trace.derive_constrains();
         let domain = constrains.get_domain();
-        assert_eq!(constrains.get_constrain_number(), 5);
+        assert_eq!(constrains.transition_constrains, 2);
 
         // boundary_constrains
         let w0 = domain.element(0);
         let root = DensePolynomial::from_coefficients_vec(vec![-w0, ONE]);
-        let boundary1 = constrains.get_constrain(0);
+        let boundary1 = constrains.get_constrain_poly(0);
         assert_eq!((boundary1 * root).evaluate(&ONE), ZERO);
 
         let w2 = domain.element(claim.step - 1);
         let root = DensePolynomial::from_coefficients_vec(vec![-w2, ONE]);
-        let boundary3 = constrains.get_constrain(2);
+        let boundary3 = constrains.get_constrain_poly(1);
         assert_eq!((boundary3 * root).evaluate(&w2), ZERO);
 
-        let carry_over_constrain = constrains.get_constrain(3).mul_by_vanishing_poly(domain);
-        let sum_constrain = constrains.get_constrain(4).mul_by_vanishing_poly(domain);
+        // transition_constrains
+        let carry_over_constrain = constrains
+            .get_constrain_poly(2)
+            .mul_by_vanishing_poly(domain);
+        let sum_constrain = constrains
+            .get_constrain_poly(3)
+            .mul_by_vanishing_poly(domain);
         for i in 0..trace.len() - 1 {
             let w_i = domain.element(i);
             assert_eq!(carry_over_constrain.evaluate(&w_i), ZERO);

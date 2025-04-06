@@ -1,3 +1,4 @@
+use crate::fiatshamir::DigestIOWritter;
 use crate::Hash;
 use ark_ff::Field;
 use digest::core_api::BlockSizeUser;
@@ -12,20 +13,6 @@ use nimue::{
 pub trait FriIOPattern<D: Digest, F: Field> {
     fn new_fri(domsep: &str, round_numbers: usize) -> Self;
     fn add_fri(self, round_numbers: usize) -> Self;
-}
-
-pub trait DigestIOWritter<D: Digest> {
-    fn add_digest(self, count: usize, label: &str) -> Self;
-}
-
-impl<D> DigestIOWritter<D> for IOPattern<DigestBridge<D>>
-where
-    D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    IOPattern<DigestBridge<D>>: ByteIOPattern,
-{
-    fn add_digest(self, count: usize, label: &str) -> Self {
-        self.add_bytes(count * <D as OutputSizeUser>::output_size(), label)
-    }
 }
 
 impl<D, F> FriIOPattern<D, F> for IOPattern<DigestBridge<D>>

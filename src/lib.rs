@@ -1,8 +1,9 @@
 pub mod air;
+pub mod fiatshamir;
 pub mod field;
 pub mod fri;
 mod merkle;
-// pub mod starks;
+pub mod starks;
 mod util;
 
 use digest::generic_array::GenericArray;

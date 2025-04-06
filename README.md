@@ -5,6 +5,14 @@ In this repo I implement a stark prover for learning purposes using arkworks.
 
 🚧 This repo is WIP 🚧 I intend to add more features with time.
 
+currently system status:
+
+- Complete ✅
+- Soundness :x:
+- Non-interactive ✅
+- Succint ✅
+- Zero-Knowledge :x:
+
 Issues/comments/critics all very welcome.
 
 ## Roadmap
@@ -15,7 +23,8 @@ Planned features(in no specific order):
 - [x] commit to multiple polynomials
 - [x] add support for AIR arithmetization
 - [x] extend `merkle.rs` to get trees with 4/8 nodes
-- [ ] Stark PIOP (WIP 🚧)
+- [x] Stark PIOP
+  - [ ] add DEEP-ALI to IOPP 🚧
 - [ ] Add `rayon` for parallelization
 - [ ] Add `criterion` and integration tests to benchmark performance
 - [ ] perf optimizations such as:
