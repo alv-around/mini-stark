@@ -39,9 +39,15 @@ where
 
         // degree padding
         println!("FRI: domain:{}, d: {}", domain_size, d);
-        let power_offset = domain_size - d - 1;
-        let x_power = SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
-        let poly_offset = DensePolynomial::from(x_power).naive_mul(&poly) + poly;
+        let power_offset = (domain_size / blowup_factor) - d;
+        let mut poly_offset = poly;
+        if power_offset > 0 {
+            let x_power =
+                SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
+            let shift = DensePolynomial::from(x_power).naive_mul(&poly_offset);
+            poly_offset = poly_offset + shift;
+            println!("FRI: degree padding performed");
+        }
 
         let mut rounds = Vec::<FriRound<W, D, F>>::with_capacity(round_num);
         let first_round = FriRound::new(poly_offset, domain_size);
