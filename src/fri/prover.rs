@@ -1,5 +1,5 @@
 use super::FriProof;
-use crate::merkle::{MerkleTree, Tree};
+use crate::merkle::{MerklePath, MerkleTree, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -52,10 +52,6 @@ where
             rounds,
             transcript,
         }
-    }
-
-    pub fn get_initial_commit(&self) -> Hash<D> {
-        self.rounds[0].commit.root()
     }
 
     pub fn prove(mut self) -> (FriProof<D, F>, Vec<u8>) {
@@ -136,8 +132,7 @@ where
             // merkle commits
             let proof1 = previous_commit.generate_proof(&y1).unwrap();
             let proof2 = previous_commit.generate_proof(&y2).unwrap();
-            let proof3 = round.commit.generate_proof(&y3).unwrap();
-            queries.push([proof1, proof2, proof3]);
+            queries.push([proof1, proof2]);
 
             previous_poly = &round.poly;
             previous_commit = &round.commit;
@@ -156,6 +151,18 @@ where
         ))
     }
 
+    pub fn get_initial_commit(&self) -> Hash<D> {
+        self.rounds[0].commit.root()
+    }
+
+    pub fn query_first_commit(&self, query: usize) -> (F, MerklePath<D, F>) {
+        let initial_commit = self.rounds[0].clone();
+        let x = initial_commit.domain.element(query);
+        let leaf = initial_commit.poly.evaluate(&x);
+        let path = initial_commit.commit.generate_proof(&leaf).unwrap();
+        (leaf, path)
+    }
+
     fn calculate_vanishing_poly(roots: &[F]) -> DensePolynomial<F> {
         roots
             .iter()
@@ -165,6 +172,7 @@ where
     }
 }
 
+#[derive(Clone)]
 struct FriRound<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
     poly: DensePolynomial<F>,
     commit: MerkleTree<TREE_WIDH, D, F>,

@@ -10,7 +10,7 @@ use digest::Digest;
 pub struct FriProof<D: Digest, F: PrimeField> {
     // transcript: Vec<u8>,
     points: Vec<[(F, F); 3]>,
-    queries: Vec<[MerklePath<D, F>; 3]>,
+    queries: Vec<[MerklePath<D, F>; 2]>,
     quotients: Vec<Vec<F>>,
 }
 

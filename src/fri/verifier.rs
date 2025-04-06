@@ -55,7 +55,7 @@ where
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
 
-        for i in 0..self.rounds - 1 {
+        for i in 1..self.rounds {
             let digest = arthur.next_digest().unwrap();
             commits.push(MerkleRoot(digest));
 
@@ -90,10 +90,10 @@ where
 
         let domain = Radix2EvaluationDomain::<F>::new(self.domain_size).unwrap();
         let mut prev_x3 = domain.element(beta);
-        for (i, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2, path3])) in
+        for (i, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2])) in
             zip(proof.points, proof.queries).enumerate()
         {
-            println!("Round {}", i);
+            println!("Verification Round {}", i + 1);
             assert_eq!(x1, prev_x3);
             assert_eq!(-x1, x2);
             assert_eq!(x1.pow([2]), x3);
@@ -113,7 +113,6 @@ where
 
             commits[i].check_proof::<TREE_WIDTH, _>(&y1, path1);
             commits[i].check_proof::<TREE_WIDTH, _>(&y2, path2);
-            commits[i].check_proof::<TREE_WIDTH, _>(&y3, path3);
 
             prev_x3 = x3;
         }
