@@ -18,8 +18,8 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
     constrain_queries: Vec<MerklePath<D, F>>,
-    mixed_constrain_commit: Hash<D>,
-    mixed_constrain_queries: Vec<(F, MerklePath<D, F>)>,
+    validity_commit: Hash<D>,
+    validity_queries: Vec<(F, MerklePath<D, F>)>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -79,20 +79,22 @@ where
                 + DensePolynomial::<_>::from_coefficients_vec(vec![r[0].pow([i as u64])])
                     * constrain_poly;
         }
-        let mixed_constrain_lde = mixed_constrain_poly
-            .clone()
-            .evaluate_over_domain(lde_domain);
-        let mut mixed_constrain_trace = TraceTable::<F>::new(lde_domain_size, 1);
-        mixed_constrain_trace.add_col(0, mixed_constrain_lde.evals);
-        let mixed_constrain_codeword = MerkleTree::<N, D, F>::new(mixed_constrain_trace.get_data());
-        let mixed_constrain_commit = mixed_constrain_codeword.root();
+        let (rest, validity_poly) =
+            mixed_constrain_poly.divide_by_vanishing_poly(constrains.domain);
+        assert_eq!(rest, DensePolynomial::zero());
+        let validity_lde = validity_poly.clone().evaluate_over_domain(lde_domain);
+
+        let mut validity_trace = TraceTable::<F>::new(lde_domain_size, 1);
+        validity_trace.add_col(0, validity_lde.evals);
+        let validity_codeword = MerkleTree::<N, D, F>::new(validity_trace.get_data());
+        let validity_commit = validity_codeword.root();
 
         // 3. Queries
         let rand_bytes: [u8; 8] = merlin.challenge_bytes().unwrap();
         let query = usize::from_le_bytes(rand_bytes) % lde_domain_size;
 
         let mut constrain_queries = Vec::new();
-        let mut mixed_constrain_queries = Vec::new();
+        let mut validity_queries = Vec::new();
 
         {
             // constrain queries
@@ -103,13 +105,13 @@ where
             }
 
             // validity query
-            let leaf = mixed_constrain_trace.get_value(query, 0);
-            let path = mixed_constrain_codeword.generate_proof(leaf).unwrap();
-            mixed_constrain_queries.push((*leaf, path));
+            let leaf = validity_trace.get_value(query, 0);
+            let path = validity_codeword.generate_proof(leaf).unwrap();
+            validity_queries.push((*leaf, path));
         }
 
         // // Make the low degree test FRI
-        let prover = FriProver::<N, D, _>::new(&mut merlin, mixed_constrain_poly, 2);
+        let prover = FriProver::<N, D, _>::new(&mut merlin, validity_poly, 2);
         let (fri_proof, _) = prover.prove();
 
         let arthur = merlin.transcript().to_vec();
@@ -118,8 +120,8 @@ where
             trace_commit,
             constrain_trace_commit,
             constrain_queries,
-            mixed_constrain_commit,
-            mixed_constrain_queries,
+            validity_commit,
+            validity_queries,
             fri_proof,
         })
     }
@@ -135,8 +137,8 @@ where
             trace_commit,
             constrain_trace_commit,
             constrain_queries,
-            mixed_constrain_commit,
-            mixed_constrain_queries,
+            validity_commit,
+            validity_queries,
             fri_proof,
         } = proof;
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&arthur);
@@ -158,9 +160,9 @@ where
         let rand_bytes: [u8; 8] = arthur.challenge_bytes().unwrap();
         let query = usize::from_le_bytes(rand_bytes);
 
-        let mixed_constrain_root = MerkleRoot::<D>(mixed_constrain_commit.clone());
-        let (v_x, path) = mixed_constrain_queries[0].clone();
-        assert!(mixed_constrain_root.check_proof::<N, _>(&v_x, path));
+        let validity_root = MerkleRoot::<D>(validity_commit.clone());
+        let (v_x, path) = validity_queries[0].clone();
+        assert!(validity_root.check_proof::<N, _>(&v_x, path));
 
         let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
         let mut c_x = DensePolynomial::zero();
@@ -178,7 +180,7 @@ where
 
         // 3. run fri
         let fri_verifier =
-            FriVerifier::<N, D, F>::new(mixed_constrain_root, degree - 1, self.blowup_factor);
+            FriVerifier::<N, D, F>::new(validity_root, degree - 1, self.blowup_factor);
         assert!(fri_verifier.verify(fri_proof, &mut arthur));
 
         true
