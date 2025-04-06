@@ -77,11 +77,6 @@ fn test_fibonacci_air_constrains() {
     let domain = constrains.get_domain();
 
     // check output constrain
-    let omega_4 = domain.element(claim.step - 1);
-    let z = DensePolynomial::from_coefficients_slice(&[-omega_4, ONE]);
-    // let boundary = constrains.get_boundary_constrain(1).clone() * z;
-    // assert_eq!(boundary.evaluate(&omega_4), ZERO);
-
     let carry_over_constrain = constrains
         .get_constrain_poly(2)
         .mul_by_vanishing_poly(domain);

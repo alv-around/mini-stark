@@ -80,6 +80,9 @@ where
                 FriRound::<W, D, _>::split_and_fold(&previous_round.poly.clone(), alpha[0]);
             let domain_size = folded_poly.degree() + 1;
 
+            println!("previous poly round coeffs: {:?}", previous_round.poly);
+            println!("foded poly coeffs: {:?}", folded_poly);
+            println!("folded poly degree:{}", folded_poly.degree());
             let round = FriRound::<W, D, _>::new(folded_poly, domain_size);
             self.rounds.push(round);
         }

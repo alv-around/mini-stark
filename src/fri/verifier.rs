@@ -83,6 +83,7 @@ where
     ) -> bool {
         let Transcript(commits, alphas, beta) = self.read_proof_transcript(arthur).unwrap();
         assert_eq!(1 << commits.len(), (self.degree + 1) * self.blowup_factor);
+        assert_eq!(self.commit.0, commits[0].0);
         if commits.len() != self.rounds || commits.len() - 1 != proof.points.len() {
             return false;
         }

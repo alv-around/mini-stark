@@ -1,6 +1,5 @@
 use crate::util::ceil_log2_k;
 use ark_ff::PrimeField;
-use ark_ff::Zero;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
@@ -113,60 +112,22 @@ impl<F: PrimeField> TraceTable<F> {
 
     pub fn derive_constrains(&self) -> Constrains<F> {
         let domain = Radix2EvaluationDomain::<F>::new(self.len()).unwrap();
-        let trace_depth = self.len();
-        let trace_polys = self.get_trace_polys();
+        let mut constrains = self.get_trace_polys();
 
-        // derive the transition quotients
-        // let omega_n_minus_one = domain.element(trace_depth - 1);
-        // let last_row_root =
-        //     DensePolynomial::from_coefficients_vec(vec![-omega_n_minus_one, F::ONE]);
-        let transition_quotients = self
+        let transition_evals = self
             .transition_constrains
             .iter()
-            .map(|f| f(&trace_polys))
-            //     .map(|poly| {
-            //         let (rest, quotient) = poly.divide_by_vanishing_poly(domain);
-            //         assert_eq!(rest, DensePolynomial::zero());
-            //         quotient * last_row_root.clone()
-            //     })
+            .map(|f| f(&constrains))
             .collect::<Vec<_>>();
 
-        // add boundary quotients to trace polys
-        // let mut trace_quotients = trace_polys
-        //     .into_iter()
-        //     .enumerate()
-        //     .map(|(i, poly)| {
-        //         let boundaries = self
-        //             .boundaries
-        //             .iter()
-        //             .filter(|(_, col)| *col == i)
-        //             .map(|(row, col)| (row, self.get_value(*row, *col)));
-        //
-        //         let (indexes, values): (Vec<&usize>, Vec<F>) = boundaries.unzip();
-        //         let interpolant_domain = Radix2EvaluationDomain::<F>::new(values.len()).unwrap();
-        //         let interpolant = interpolant_domain.ifft(&values);
-        //         let numerator = poly - DensePolynomial::from_coefficients_vec(interpolant);
-        //         let zerofier = indexes
-        //             .iter()
-        //             .map(|i| domain.element(**i))
-        //             .map(|i| DensePolynomial::from_coefficients_vec(vec![-i, F::ONE]))
-        //             .fold(
-        //                 DensePolynomial::from_coefficients_vec(vec![F::ONE]),
-        //                 |acc, root| acc * root,
-        //             );
-        //         numerator / zerofier
-        //     })
-        //     .collect::<Vec<_>>();
-
         let trace_constrains = self.width();
-        let transition_constrains = transition_quotients.len();
-        let mut trace_quotients = trace_polys.clone();
-        trace_quotients.extend(transition_quotients);
+        let transition_constrains = transition_evals.len();
+        constrains.extend(transition_evals);
         Constrains {
             domain,
             trace_constrains,
             transition_constrains,
-            constrains: trace_quotients,
+            constrains,
         }
     }
 }
@@ -240,12 +201,11 @@ mod test {
 
             // add transition constrains
             trace.add_transition_constrain(Box::new(move |trace_polys| {
-                trace_polys[0].clone()
-                    * DensePolynomial::from_coefficients_vec(vec![trace.omega.clone()])
+                trace_polys[0].clone() * DensePolynomial::from_coefficients_vec(vec![trace.omega])
                     - trace_polys[1].clone()
             }));
             trace.add_transition_constrain(Box::new(move |trace_polys| {
-                trace_polys[1].clone() * trace.omega.clone()
+                trace_polys[1].clone() * trace.omega
                     - (trace_polys[0].clone() + trace_polys[1].clone())
             }));
 

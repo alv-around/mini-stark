@@ -20,6 +20,7 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     constrain_queries: Vec<MerklePath<D, F>>,
     validity_commit: Hash<D>,
     validity_queries: Vec<(F, MerklePath<D, F>)>,
+    fri_commit: Hash<D>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -112,6 +113,7 @@ where
 
         // // Make the low degree test FRI
         let prover = FriProver::<N, D, _>::new(&mut merlin, validity_poly, 2);
+        let fri_commit = prover.get_initial_commit();
         let (fri_proof, _) = prover.prove();
 
         let arthur = merlin.transcript().to_vec();
@@ -122,6 +124,7 @@ where
             constrain_queries,
             validity_commit,
             validity_queries,
+            fri_commit,
             fri_proof,
         })
     }
@@ -139,6 +142,7 @@ where
             constrain_queries,
             validity_commit,
             validity_queries,
+            fri_commit,
             fri_proof,
         } = proof;
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&arthur);
@@ -179,8 +183,8 @@ where
         assert_eq!(rest, DensePolynomial::zero());
 
         // 3. run fri
-        let fri_verifier =
-            FriVerifier::<N, D, F>::new(validity_root, degree - 1, self.blowup_factor);
+        let fri_root = MerkleRoot::<D>(fri_commit);
+        let fri_verifier = FriVerifier::<N, D, F>::new(fri_root, degree - 1, self.blowup_factor);
         assert!(fri_verifier.verify(fri_proof, &mut arthur));
 
         true

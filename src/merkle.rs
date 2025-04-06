@@ -1,5 +1,5 @@
 use crate::{util::logarithm_of_two_k, Hash};
-use ark_ff::{biginteger::BigInt, PrimeField};
+use ark_ff::PrimeField;
 use digest::Digest;
 use std::ops::Range;
 
@@ -200,7 +200,7 @@ impl<D: Digest> MerkleRoot<D> {
                 return false;
             }
 
-            previous = MerkleTree::<N, D, F>::calculate_from_nodes(&level);
+            previous = MerkleTree::<N, D, F>::calculate_from_nodes(level);
             println!("Merkle Verification: Round {i} done");
         }
 
