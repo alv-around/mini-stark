@@ -42,9 +42,9 @@ where
         IOPattern::<DigestBridge<D>>::new(domsep)
             .add_digest(2, "commit to trace & quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
-            .add_fri(domain_size_log)
             // TODO: make number of queries variable of a security parameter
             .challenge_bytes(8, "retrive random queries")
+            .add_fri(domain_size_log)
     }
 }
 
