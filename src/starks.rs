@@ -143,14 +143,18 @@ where
         let degree = constrains.domain.size();
 
         // 1. check symbolic link to quotients ??
-        let _zerofier = constrains.domain.vanishing_polynomial();
         assert_eq!(arthur.next_digest().unwrap(), trace_commit);
         assert_eq!(arthur.next_digest().unwrap(), constrain_trace_commit);
-        let _r: [F; 1] = arthur.challenge_scalars().unwrap();
+        let [r]: [F; 1] = arthur.challenge_scalars().unwrap();
 
         // 2. run queries
         // TODO: number of queries dependent of target security. For the moment one query
         let lde_domain = Radix2EvaluationDomain::<F>::new(degree * self.blowup_factor).unwrap();
+        let zerofier = constrains
+            .domain
+            .vanishing_polynomial()
+            .evaluate_over_domain(lde_domain);
+        println!("Zerofier evals: {:?}", zerofier.evals);
         let rand_bytes: [u8; 8] = arthur.challenge_bytes().unwrap();
         let query = usize::from_le_bytes(rand_bytes);
 
@@ -159,13 +163,18 @@ where
         assert!(mixed_constrain_root.check_proof::<N, _>(&v_x, path));
 
         let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
-        // let mut c_x = DensePolynomial::zero();
+        let mut c_x = DensePolynomial::zero();
         for (i, path) in constrain_queries.into_iter().enumerate() {
             let constrain = constrains.get_constrain_poly(i);
             let w_i = lde_domain.element(query);
             let leaf = constrain.evaluate(&w_i);
             assert!(quotient_root.check_proof::<N, _>(&leaf, path));
+
+            c_x = c_x + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
         }
+
+        let (rest, _quotient) = c_x.divide_by_vanishing_poly(constrains.domain);
+        assert_eq!(rest, DensePolynomial::zero());
 
         // 3. run fri
         let fri_verifier =
