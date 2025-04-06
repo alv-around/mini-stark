@@ -17,7 +17,7 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     arthur: Vec<u8>,
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
-    constrain_queries: Vec<MerklePath<D, F>>,
+    constrain_queries: Vec<Vec<MerklePath<D, F>>>,
     validity_commit: Hash<D>,
     validity_queries: Vec<(F, MerklePath<D, F>)>,
     fri_commit: Hash<D>,
@@ -26,6 +26,7 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
 
 pub struct Stark<const N: usize, D: Digest, F: PrimeField> {
     blowup_factor: usize,
+    query_num: usize,
     field: PhantomData<F>,
     digest: PhantomData<D>,
 }
@@ -35,9 +36,10 @@ where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
-    pub fn new(blowup_factor: usize) -> Self {
+    pub fn new(blowup_factor: usize, query_num: usize) -> Self {
         Self {
             blowup_factor,
+            query_num,
             field: PhantomData,
             digest: PhantomData,
         }
@@ -90,20 +92,25 @@ where
         let validity_codeword = MerkleTree::<N, D, F>::new(validity_trace.get_data());
         let validity_commit = validity_codeword.root();
 
-        // 3. Queries
-        let rand_bytes: [u8; 8] = merlin.challenge_bytes().unwrap();
-        let query = usize::from_le_bytes(rand_bytes) % lde_domain_size;
+        // 2. Queries
+        let mut query_bytes = vec![0u8; 8 * self.query_num];
+        merlin.fill_challenge_bytes(&mut query_bytes).unwrap();
+        let queries = query_bytes
+            .chunks_exact_mut(8)
+            .map(|bytes| usize::from_le_bytes(bytes.try_into().unwrap()) % lde_domain_size)
+            .collect::<Vec<_>>();
 
         let mut constrain_queries = Vec::new();
         let mut validity_queries = Vec::new();
-
-        {
+        for query in queries.into_iter() {
             // constrain queries
+            let mut query_constrain_queries = Vec::new();
             for i in 0..constrains.len() {
                 let leaf = constrain_trace.get_value(query, i);
                 let path = constrain_trace_codeword.generate_proof(leaf).unwrap();
-                constrain_queries.push(path);
+                query_constrain_queries.push(path);
             }
+            constrain_queries.push(query_constrain_queries);
 
             // validity query
             let leaf = validity_trace.get_value(query, 0);
@@ -111,7 +118,7 @@ where
             validity_queries.push((*leaf, path));
         }
 
-        // // Make the low degree test FRI
+        // 3. Make the low degree test FRI
         let prover = FriProver::<N, D, _>::new(&mut merlin, validity_poly, 2);
         let fri_commit = prover.get_initial_commit();
         let (fri_proof, _) = prover.prove();
@@ -161,26 +168,32 @@ where
             .vanishing_polynomial()
             .evaluate_over_domain(lde_domain);
         println!("Zerofier evals: {:?}", zerofier.evals);
-        let rand_bytes: [u8; 8] = arthur.challenge_bytes().unwrap();
-        let query = usize::from_le_bytes(rand_bytes);
+        let mut query_bytes = vec![0u8; 8 * self.query_num];
+        arthur.fill_challenge_bytes(&mut query_bytes).unwrap();
+        let queries = query_bytes
+            .chunks_exact_mut(8)
+            .map(|bytes| usize::from_le_bytes(bytes.try_into().unwrap()) % lde_domain.size())
+            .collect::<Vec<_>>();
 
         let validity_root = MerkleRoot::<D>(validity_commit.clone());
-        let (v_x, path) = validity_queries[0].clone();
-        assert!(validity_root.check_proof::<N, _>(&v_x, path));
-
         let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
-        let mut c_x = DensePolynomial::zero();
-        for (i, path) in constrain_queries.into_iter().enumerate() {
-            let constrain = constrains.get_constrain_poly(i);
-            let w_i = lde_domain.element(query);
-            let leaf = constrain.evaluate(&w_i);
-            assert!(quotient_root.check_proof::<N, _>(&leaf, path));
+        for (i, query) in queries.into_iter().enumerate() {
+            let (v_x, path) = validity_queries[i].clone();
+            assert!(validity_root.check_proof::<N, _>(&v_x, path));
 
-            c_x = c_x + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
+            let mut c_x = DensePolynomial::zero();
+            for (j, path) in constrain_queries[i].iter().enumerate() {
+                let constrain = constrains.get_constrain_poly(j);
+                let w_i = lde_domain.element(query);
+                let leaf = constrain.evaluate(&w_i);
+                assert!(quotient_root.check_proof::<N, _>(&leaf, path.clone()));
+
+                c_x = c_x
+                    + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
+            }
+            let (rest, _quotient) = c_x.divide_by_vanishing_poly(constrains.domain);
+            assert_eq!(rest, DensePolynomial::zero());
         }
-
-        let (rest, _quotient) = c_x.divide_by_vanishing_poly(constrains.domain);
-        assert_eq!(rest, DensePolynomial::zero());
 
         // 3. run fri
         let fri_root = MerkleRoot::<D>(fri_commit);

@@ -29,7 +29,7 @@ where
 }
 
 pub trait StarkIOPattern<D: Digest, F: Field> {
-    fn new_stark(domain_size_log: usize, domsep: &str) -> Self;
+    fn new_stark(domain_size_log: usize, num_queries: usize, domsep: &str) -> Self;
 }
 
 impl<D, F> StarkIOPattern<D, F> for IOPattern<DigestBridge<D>>
@@ -38,12 +38,11 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D> + FriIOPattern<D, F>,
 {
-    fn new_stark(domain_size_log: usize, domsep: &str) -> Self {
+    fn new_stark(domain_size_log: usize, num_queries: usize, domsep: &str) -> Self {
         IOPattern::<DigestBridge<D>>::new(domsep)
             .add_digest(2, "commit to trace & quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
-            // TODO: make number of queries variable of a security parameter
-            .challenge_bytes(8, "retrive random queries")
+            .challenge_bytes(8 * num_queries, "retrive random queries")
             .add_fri(domain_size_log)
     }
 }
