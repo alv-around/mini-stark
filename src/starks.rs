@@ -3,9 +3,9 @@ use crate::fri::FriProof;
 use crate::fri::{fiatshamir::DigestReader, prover::FriProver, verifier::FriVerifier};
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
 use crate::Hash;
-use ark_ff::PrimeField;
+use ark_ff::{PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
-use ark_poly::{DenseUVPolynomial, EvaluationDomain, Radix2EvaluationDomain};
+use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
 use nimue::plugins::ark::FieldChallenges;
@@ -148,22 +148,26 @@ where
         assert_eq!(arthur.next_digest().unwrap(), constrain_trace_commit);
         let _r: [F; 1] = arthur.challenge_scalars().unwrap();
 
-        // 3. run queries
+        // 2. run queries
         // TODO: number of queries dependent of target security. For the moment one query
-        let _trace_domain = Radix2EvaluationDomain::<F>::new(degree).unwrap();
+        let lde_domain = Radix2EvaluationDomain::<F>::new(degree * self.blowup_factor).unwrap();
         let rand_bytes: [u8; 8] = arthur.challenge_bytes().unwrap();
-        let _query = usize::from_le_bytes(rand_bytes);
+        let query = usize::from_le_bytes(rand_bytes);
 
         let mixed_constrain_root = MerkleRoot::<D>(mixed_constrain_commit.clone());
         let (v_x, path) = mixed_constrain_queries[0].clone();
         assert!(mixed_constrain_root.check_proof::<N, _>(&v_x, path));
 
-        // let quotient_root = MerkleRoot::<D>(proof.constrain_trace_commit);
-        // for query in proof.constrain_queries.into_iter() {
-        //     // assert!(quotient_root.check_proof::<N, _>(&leaf, query));
-        // }
+        let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
+        // let mut c_x = DensePolynomial::zero();
+        for (i, path) in constrain_queries.into_iter().enumerate() {
+            let constrain = constrains.get_constrain_poly(i);
+            let w_i = lde_domain.element(query);
+            let leaf = constrain.evaluate(&w_i);
+            assert!(quotient_root.check_proof::<N, _>(&leaf, path));
+        }
 
-        // 2. run fri
+        // 3. run fri
         let fri_verifier =
             FriVerifier::<N, D, F>::new(mixed_constrain_root, degree - 1, self.blowup_factor);
         assert!(fri_verifier.verify(fri_proof, &mut arthur));
