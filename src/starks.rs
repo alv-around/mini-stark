@@ -20,7 +20,6 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     constrain_queries: Vec<MerklePath<D, F>>,
     mixed_constrain_commit: Hash<D>,
     mixed_constrain_queries: Vec<(F, MerklePath<D, F>)>,
-    fri_commit: Hash<D>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -88,15 +87,10 @@ where
         let mixed_constrain_codeword = MerkleTree::<N, D, F>::new(mixed_constrain_trace.get_data());
         let mixed_constrain_commit = mixed_constrain_codeword.root();
 
-        //
+        // 3. Queries
         let rand_bytes: [u8; 8] = merlin.challenge_bytes().unwrap();
         let query = usize::from_le_bytes(rand_bytes) % lde_domain_size;
 
-        // // Make the low degree test FRI
-        let prover = FriProver::<N, D, _>::new(&mut merlin, mixed_constrain_poly, 2);
-        let fri_commit = prover.get_initial_commit();
-
-        // 3. Queries
         let mut constrain_queries = Vec::new();
         let mut mixed_constrain_queries = Vec::new();
 
@@ -109,14 +103,13 @@ where
             }
 
             // validity query
-            // TODO: refactor to not use prover for these queies
-            // let (leaf, path) = prover.query_first_commit(query);
             let leaf = mixed_constrain_trace.get_value(query, 0);
             let path = mixed_constrain_codeword.generate_proof(leaf).unwrap();
             mixed_constrain_queries.push((*leaf, path));
         }
 
-        // TODO: move prove when prover initialize
+        // // Make the low degree test FRI
+        let prover = FriProver::<N, D, _>::new(&mut merlin, mixed_constrain_poly, 2);
         let (fri_proof, _) = prover.prove();
 
         let arthur = merlin.transcript().to_vec();
@@ -127,7 +120,6 @@ where
             constrain_queries,
             mixed_constrain_commit,
             mixed_constrain_queries,
-            fri_commit,
             fri_proof,
         })
     }
@@ -145,7 +137,6 @@ where
             constrain_queries,
             mixed_constrain_commit,
             mixed_constrain_queries,
-            fri_commit,
             fri_proof,
         } = proof;
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&arthur);
@@ -164,8 +155,8 @@ where
         let _query = usize::from_le_bytes(rand_bytes);
 
         let mixed_constrain_root = MerkleRoot::<D>(mixed_constrain_commit.clone());
-        let (mixed_const_leaf, path) = mixed_constrain_queries[0].clone();
-        assert!(mixed_constrain_root.check_proof::<N, _>(&mixed_const_leaf, path));
+        let (v_x, path) = mixed_constrain_queries[0].clone();
+        assert!(mixed_constrain_root.check_proof::<N, _>(&v_x, path));
 
         // let quotient_root = MerkleRoot::<D>(proof.constrain_trace_commit);
         // for query in proof.constrain_queries.into_iter() {
@@ -174,7 +165,7 @@ where
 
         // 2. run fri
         let fri_verifier =
-            FriVerifier::<N, D, F>::new(MerkleRoot(fri_commit), degree - 1, self.blowup_factor);
+            FriVerifier::<N, D, F>::new(mixed_constrain_root, degree - 1, self.blowup_factor);
         assert!(fri_verifier.verify(fri_proof, &mut arthur));
 
         true
