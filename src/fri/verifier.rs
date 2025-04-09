@@ -21,9 +21,7 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
-    degree: usize,
     domain_size: usize,
-    blowup_factor: usize,
     rounds: usize,
     commit: MerkleRoot<D>,
     marker: PhantomData<F>,
@@ -39,10 +37,8 @@ where
         let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap();
 
         Self {
-            degree,
             rounds,
             domain_size,
-            blowup_factor,
             commit,
             marker: PhantomData::<F>,
         }

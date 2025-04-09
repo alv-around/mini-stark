@@ -61,7 +61,11 @@ where
 
         // TODO: add the coset trick to add zk
         let lde_domain_size = self.blowup_factor * trace.trace.len();
-        let lde_domain = Radix2EvaluationDomain::new(lde_domain_size).unwrap();
+        let [random_shift]: [F; 1] = merlin.challenge_scalars().unwrap();
+        let lde_domain = Radix2EvaluationDomain::new(lde_domain_size)
+            .unwrap()
+            .get_coset(random_shift)
+            .unwrap();
         let constrains = trace.derive_constrains();
         let mut constrain_trace = Matrix::<F>::new(lde_domain_size, constrains.len(), None);
         for (i, poly) in constrains.get_polynomials().into_iter().enumerate() {
@@ -150,17 +154,20 @@ where
             fri_proof,
         } = proof;
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&arthur);
-        let domain = Radix2EvaluationDomain::<F>::new(self.degree + 1).unwrap();
-
-        // 1. check symbolic link to quotients ??
         assert_eq!(arthur.next_digest().unwrap(), trace_commit);
+
+        let [shift]: [F; 1] = arthur.challenge_scalars().unwrap();
+        let domain = Radix2EvaluationDomain::<F>::new(self.degree + 1).unwrap();
         assert_eq!(arthur.next_digest().unwrap(), constrain_trace_commit);
+
         let [r]: [F; 1] = arthur.challenge_scalars().unwrap();
 
         // 2. run queries
         // TODO: number of queries dependent of target security. For the moment one query
-        let lde_domain =
-            Radix2EvaluationDomain::<F>::new(domain.size() * self.blowup_factor).unwrap();
+        let lde_domain = Radix2EvaluationDomain::<F>::new(domain.size() * self.blowup_factor)
+            .unwrap()
+            .get_coset(shift)
+            .unwrap();
         let zerofier = domain
             .vanishing_polynomial()
             .evaluate_over_domain(lde_domain);
