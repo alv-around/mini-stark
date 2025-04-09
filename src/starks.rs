@@ -1,4 +1,4 @@
-use crate::air::{Constrains, Provable, TraceTable};
+use crate::air::{Constrains, Matrix, Provable};
 use crate::fri::FriProof;
 use crate::fri::{fiatshamir::DigestReader, prover::FriProver, verifier::FriVerifier};
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
@@ -25,6 +25,7 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
 }
 
 pub struct Stark<const N: usize, D: Digest, F: PrimeField> {
+    degree: usize,
     blowup_factor: usize,
     query_num: usize,
     field: PhantomData<F>,
@@ -36,8 +37,9 @@ where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
-    pub fn new(blowup_factor: usize, query_num: usize) -> Self {
+    pub fn new(blowup_factor: usize, query_num: usize, degree: usize) -> Self {
         Self {
+            degree,
             blowup_factor,
             query_num,
             field: PhantomData,
@@ -52,20 +54,20 @@ where
     ) -> Result<StarkProof<D, F>, Box<dyn Error>> {
         // 1. compute trace polys and commit to them
         let trace = air.trace(&witness);
-        let trace_polys = trace.get_trace_polys();
-        let mut trace_poly_coeffs = TraceTable::<F>::new(trace.len(), trace.width());
-        for (i, poly) in trace_polys.iter().enumerate() {
-            trace_poly_coeffs.add_col(i, poly.coeffs.clone());
-        }
-        let trace_codeword = MerkleTree::<N, D, F>::new(trace_poly_coeffs.get_data());
+        let trace_domain = trace.get_domain();
+        let trace_codeword = MerkleTree::<N, D, F>::new(trace.trace.get_data());
         let trace_commit = trace_codeword.root();
         merlin.add_bytes(&trace_commit).unwrap();
 
         // TODO: add the coset trick to add zk
-        let lde_domain_size = self.blowup_factor * trace.len();
-        let lde_domain = Radix2EvaluationDomain::new(lde_domain_size).unwrap();
+        let lde_domain_size = self.blowup_factor * trace.trace.len();
+        let [random_shift]: [F; 1] = merlin.challenge_scalars().unwrap();
+        let lde_domain = Radix2EvaluationDomain::new(lde_domain_size)
+            .unwrap()
+            .get_coset(random_shift)
+            .unwrap();
         let constrains = trace.derive_constrains();
-        let mut constrain_trace = TraceTable::<F>::new(lde_domain_size, constrains.len());
+        let mut constrain_trace = Matrix::<F>::new(lde_domain_size, constrains.len(), None);
         for (i, poly) in constrains.get_polynomials().into_iter().enumerate() {
             let evals = poly.evaluate_over_domain(lde_domain);
             constrain_trace.add_col(i, evals.evals);
@@ -82,12 +84,11 @@ where
                 + DensePolynomial::<_>::from_coefficients_vec(vec![r[0].pow([i as u64])])
                     * constrain_poly;
         }
-        let (rest, validity_poly) =
-            mixed_constrain_poly.divide_by_vanishing_poly(constrains.domain);
+        let (rest, validity_poly) = mixed_constrain_poly.divide_by_vanishing_poly(trace_domain);
         assert_eq!(rest, DensePolynomial::zero());
         let validity_lde = validity_poly.clone().evaluate_over_domain(lde_domain);
 
-        let mut validity_trace = TraceTable::<F>::new(lde_domain_size, 1);
+        let mut validity_trace = Matrix::<F>::new(lde_domain_size, 1, None);
         validity_trace.add_col(0, validity_lde.evals);
         let validity_codeword = MerkleTree::<N, D, F>::new(validity_trace.get_data());
         let validity_commit = validity_codeword.root();
@@ -153,18 +154,21 @@ where
             fri_proof,
         } = proof;
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&arthur);
-        let degree = constrains.domain.size();
-
-        // 1. check symbolic link to quotients ??
         assert_eq!(arthur.next_digest().unwrap(), trace_commit);
+
+        let [shift]: [F; 1] = arthur.challenge_scalars().unwrap();
+        let domain = Radix2EvaluationDomain::<F>::new(self.degree + 1).unwrap();
         assert_eq!(arthur.next_digest().unwrap(), constrain_trace_commit);
+
         let [r]: [F; 1] = arthur.challenge_scalars().unwrap();
 
         // 2. run queries
         // TODO: number of queries dependent of target security. For the moment one query
-        let lde_domain = Radix2EvaluationDomain::<F>::new(degree * self.blowup_factor).unwrap();
-        let zerofier = constrains
-            .domain
+        let lde_domain = Radix2EvaluationDomain::<F>::new(domain.size() * self.blowup_factor)
+            .unwrap()
+            .get_coset(shift)
+            .unwrap();
+        let zerofier = domain
             .vanishing_polynomial()
             .evaluate_over_domain(lde_domain);
         println!("Zerofier evals: {:?}", zerofier.evals);
@@ -191,13 +195,13 @@ where
                 c_x = c_x
                     + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
             }
-            let (rest, _quotient) = c_x.divide_by_vanishing_poly(constrains.domain);
+            let (rest, _quotient) = c_x.divide_by_vanishing_poly(domain);
             assert_eq!(rest, DensePolynomial::zero());
         }
 
         // 3. run fri
         let fri_root = MerkleRoot::<D>(fri_commit);
-        let fri_verifier = FriVerifier::<N, D, F>::new(fri_root, degree - 1, self.blowup_factor);
+        let fri_verifier = FriVerifier::<N, D, F>::new(fri_root, self.degree, self.blowup_factor);
         assert!(fri_verifier.verify(fri_proof, &mut arthur));
 
         true

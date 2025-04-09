@@ -1,6 +1,6 @@
 use ark_ff::{AdditiveGroup, Field};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Polynomial};
-use mini_starks::air::*;
+use mini_starks::air::{Provable, TraceTable};
 use mini_starks::fiatshamir::StarkIOPattern;
 use mini_starks::field::Goldilocks;
 use mini_starks::starks::Stark;
@@ -35,7 +35,7 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
         trace.add_boundary_constrain(0, 1);
 
         // trace
-        for i in 0..trace.len() {
+        for i in 0..trace.step_number() {
             let c = a + b;
             trace.add_row(i, vec![a, b]);
             a = b;
@@ -74,7 +74,7 @@ fn test_fibonacci_air_constrains() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
     let constrains = trace.derive_constrains();
-    let domain = constrains.get_domain();
+    let domain = trace.get_domain();
 
     // check output constrain
     let carry_over_constrain = constrains
@@ -83,7 +83,7 @@ fn test_fibonacci_air_constrains() {
     let sum_constrain = constrains
         .get_constrain_poly(3)
         .mul_by_vanishing_poly(domain);
-    for i in 0..trace.len() - 1 {
+    for i in 0..trace.step_number() - 1 {
         let w_i = domain.element(i);
         assert_eq!(carry_over_constrain.evaluate(&w_i), ZERO);
         assert_eq!(sum_constrain.evaluate(&w_i), ZERO);
@@ -100,7 +100,7 @@ fn test_stark_prover() {
         StarkIOPattern::<_, Goldilocks>::new_stark(4, 80, "🐺");
     let transcript = io.to_merlin();
 
-    let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2, 80);
+    let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2, 80, trace.step_number() - 1);
     let proof = proof_system.prove(transcript, claim, witness).unwrap();
 
     let is_alright = proof_system.verify(io, constrains, proof);

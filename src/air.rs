@@ -1,88 +1,120 @@
-use crate::util::ceil_log2_k;
+use crate::util::is_power_of_two;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::EvaluationDomain;
-
-const TWO: usize = 2;
+use ark_std::test_rng;
 
 pub trait Provable<W, F: PrimeField> {
     fn trace(&self, witness: &W) -> TraceTable<F>;
     // fn derive_constrians(&self) -> Constrains<F>;
 }
 
-pub struct TraceTable<F: PrimeField> {
-    depth: usize,
+// Matrix is the basic struct for the trace, and ldes
+pub(crate) struct Matrix<F: PrimeField> {
+    length: usize,
     width: usize,
-    pub omega: F,
-    boundaries: Vec<(usize, usize)>,
-    transition_constrains: Vec<Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>>,
     data: Vec<F>,
 }
 
-impl<F: PrimeField> TraceTable<F> {
-    pub fn new(steps: usize, width: usize) -> Self {
-        // TODO: add random padding for [steps, depth) rows
-        // TODO: replace ceil with domain::new
-        let boundaries = Vec::new();
-        let depth = 1usize << ceil_log2_k::<TWO>(steps);
-        let capacity = depth * width;
-        let mut data = Vec::<F>::with_capacity(capacity);
-        let omega = Radix2EvaluationDomain::<F>::new(depth).unwrap().group_gen();
-        data.resize(capacity, F::ZERO);
+impl<F: PrimeField> Matrix<F> {
+    pub(crate) fn new(length: usize, width: usize, entries: Option<Vec<F>>) -> Self {
+        assert!(is_power_of_two(length * width));
+        let data = match entries {
+            Some(data) => {
+                assert_eq!(data.len(), length * width);
+                data
+            }
+            None => vec![F::ZERO; length * width],
+        };
         Self {
-            depth,
+            length,
             width,
-            omega,
-            boundaries,
-            transition_constrains: Vec::new(),
             data,
         }
     }
 
-    pub fn get_data(&self) -> &[F] {
+    pub(crate) fn get_data(&self) -> &[F] {
         &self.data[..]
     }
 
-    // compute trace polynomials
-    pub fn get_trace_polys(&self) -> Vec<DensePolynomial<F>> {
-        let domain = Radix2EvaluationDomain::<F>::new(self.len()).unwrap();
-        let trace_depth = self.len();
-        let trace_width = self.width();
-
-        let mut trace_polys = Vec::with_capacity(trace_width);
-        for i in 0..trace_width {
-            // derive trace polys
-            let evaluations = (0..trace_depth)
-                .map(|j| *self.get_value(j, i))
-                .collect::<Vec<_>>();
-            let coeffs = domain.ifft(&evaluations);
-            let column_poly = DensePolynomial::from_coefficients_vec(coeffs);
-            trace_polys.push(column_poly);
-        }
-
-        trace_polys
+    pub(crate) fn get_value(&self, row: usize, col: usize) -> &F {
+        assert!(row < self.length && col < self.width);
+        &self.data[row * self.width + col]
     }
 
-    pub fn add_row(&mut self, index: usize, row: Vec<F>) {
-        assert_eq!(row.len(), self.width);
-        assert!(index < self.depth);
-        for (j, val) in row.into_iter().enumerate() {
-            self.data[index * self.width + j] = val;
-        }
+    pub(crate) fn len(&self) -> usize {
+        self.length
     }
 
-    pub fn add_col(&mut self, index: usize, col: Vec<F>) {
-        assert_eq!(col.len(), self.depth);
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.length == 0 || self.width == 0
+    }
+
+    pub(crate) fn add_col(&mut self, index: usize, col: Vec<F>) {
+        assert_eq!(col.len(), self.length);
         assert!(index < self.width);
         for (i, val) in col.into_iter().enumerate() {
             self.data[i * self.width + index] = val;
         }
     }
+}
+
+pub struct TraceTable<F: PrimeField> {
+    pub(super) trace: Matrix<F>,
+    steps: usize,
+    domain: Radix2EvaluationDomain<F>,
+    pub omega: F,
+    boundaries: Vec<(usize, usize)>,
+    transition_constrains: Vec<Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>>,
+}
+
+impl<F: PrimeField> TraceTable<F> {
+    pub fn new(steps: usize, registers: usize) -> Self {
+        let domain = Radix2EvaluationDomain::<F>::new(steps + 1).unwrap();
+        let omega = domain.group_gen();
+
+        let mut uninitialized_trace = vec![F::ZERO; steps * registers];
+        // add random padding to make zk
+        let padding_length = (domain.size() - steps) * registers;
+        let random_padding = (0..padding_length)
+            .map(|_| F::rand(&mut test_rng()))
+            .collect::<Vec<F>>();
+        uninitialized_trace.extend(random_padding);
+
+        let trace = Matrix::<F>::new(domain.size(), registers, Some(uninitialized_trace));
+
+        let boundaries = Vec::new();
+        Self {
+            steps,
+            domain,
+            omega,
+            boundaries,
+            transition_constrains: Vec::new(),
+            trace,
+        }
+    }
+
+    pub fn step_number(&self) -> usize {
+        self.steps
+    }
+
+    pub fn get_domain(&self) -> Radix2EvaluationDomain<F> {
+        self.domain
+    }
+
+    pub fn add_row(&mut self, index: usize, row: Vec<F>) {
+        assert_eq!(row.len(), self.trace.width);
+        assert!(index < self.steps);
+        for (j, val) in row.into_iter().enumerate() {
+            self.trace.data[index * self.trace.width + j] = val;
+        }
+    }
 
     pub fn add_boundary_constrain(&mut self, row: usize, col: usize) {
-        assert!(row < self.len() && col < self.width());
+        assert!(row < self.steps && col < self.trace.width);
         self.boundaries.push((row, col));
     }
 
@@ -93,25 +125,7 @@ impl<F: PrimeField> TraceTable<F> {
         self.transition_constrains.push(f);
     }
 
-    pub fn get_value(&self, row: usize, col: usize) -> &F {
-        assert!(row < self.len() && col < self.width());
-        &self.data[row * self.width + col]
-    }
-
-    pub fn len(&self) -> usize {
-        self.depth
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.depth == 0 || self.width == 0
-    }
-
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
     pub fn derive_constrains(&self) -> Constrains<F> {
-        let domain = Radix2EvaluationDomain::<F>::new(self.len()).unwrap();
         let mut constrains = self.get_trace_polys();
 
         let transition_evals = self
@@ -120,22 +134,36 @@ impl<F: PrimeField> TraceTable<F> {
             .map(|f| f(&constrains))
             .collect::<Vec<_>>();
 
-        let trace_constrains = self.width();
-        let transition_constrains = transition_evals.len();
+        let trace_constrains_num = self.trace.width;
+        let transition_constrains_num = transition_evals.len();
         constrains.extend(transition_evals);
         Constrains {
-            domain,
-            trace_constrains,
-            transition_constrains,
+            trace_constrains_num,
+            transition_constrains_num,
             constrains,
         }
+    }
+
+    // compute trace polynomials
+    pub(crate) fn get_trace_polys(&self) -> Vec<DensePolynomial<F>> {
+        let mut trace_polys = Vec::with_capacity(self.trace.width);
+        for i in 0..self.trace.width {
+            // derive trace polys
+            let evaluations = (0..self.trace.length)
+                .map(|j| *self.trace.get_value(j, i))
+                .collect::<Vec<_>>();
+            let coeffs = self.domain.ifft(&evaluations);
+            let column_poly = DensePolynomial::from_coefficients_vec(coeffs);
+            trace_polys.push(column_poly);
+        }
+
+        trace_polys
     }
 }
 
 pub struct Constrains<F: PrimeField> {
-    pub domain: Radix2EvaluationDomain<F>,
-    trace_constrains: usize,
-    transition_constrains: usize,
+    trace_constrains_num: usize,
+    transition_constrains_num: usize,
     constrains: Vec<DensePolynomial<F>>,
 }
 
@@ -145,16 +173,12 @@ impl<F: PrimeField> Constrains<F> {
     }
 
     pub fn get_constrain_poly(&self, col: usize) -> DensePolynomial<F> {
-        assert!(col < self.trace_constrains + self.transition_constrains);
+        assert!(col < self.trace_constrains_num + self.transition_constrains_num);
         self.constrains[col].clone()
     }
 
     pub fn get_polynomials(&self) -> Vec<DensePolynomial<F>> {
         self.constrains.clone()
-    }
-
-    pub fn get_domain(&self) -> Radix2EvaluationDomain<F> {
-        self.domain
     }
 }
 
@@ -189,7 +213,7 @@ mod test {
             trace.add_boundary_constrain(0, 1);
 
             // trace
-            for i in 0..trace.len() {
+            for i in 0..self.step {
                 let c = a + b;
                 trace.add_row(i, vec![a, b]);
                 a = b;
@@ -213,6 +237,7 @@ mod test {
         }
     }
 
+    /// Test multiple trace lengths, assert step number = output, and random padding after steps
     #[test]
     fn test_air_trace() {
         let third_fibonacci = FibonacciClaim {
@@ -220,16 +245,21 @@ mod test {
             output: Goldilocks::from(3),
         };
         let trace = third_fibonacci.trace(&Witness);
-        assert_eq!(trace.len(), 4);
-        assert_eq!(trace.width(), 2);
-        assert_eq!(*trace.get_value(0, 0), ONE);
+        assert_eq!(trace.trace.len(), 4);
+        assert_eq!(trace.trace.width, 2);
+        assert_eq!(*trace.trace.get_value(0, 0), ONE);
         assert_eq!(
-            *trace.get_value(third_fibonacci.step - 1, 1),
+            *trace.trace.get_value(third_fibonacci.step - 1, 1),
             third_fibonacci.output
         );
-        assert_eq!(
-            *trace.get_value(third_fibonacci.step, 0),
+        // assert that trace has random panding from after steps
+        assert_ne!(
+            *trace.trace.get_value(third_fibonacci.step, 0),
             third_fibonacci.output
+        );
+        assert_ne!(
+            *trace.trace.get_value(third_fibonacci.step, 0),
+            Goldilocks::ZERO
         );
 
         let fourth_fib = FibonacciClaim {
@@ -237,13 +267,33 @@ mod test {
             output: Goldilocks::from(5),
         };
         let trace = fourth_fib.trace(&Witness);
-        assert_eq!(trace.len(), 4);
-        assert_eq!(trace.width(), 2);
-        assert_eq!(*trace.get_value(0, 1), ONE);
+        assert_eq!(trace.trace.length, 8);
+        assert_eq!(trace.trace.width, 2);
+        assert_eq!(*trace.trace.get_value(0, 1), ONE);
         assert_eq!(
-            *trace.get_value(third_fibonacci.step - 1, 1),
-            third_fibonacci.output
+            *trace.trace.get_value(fourth_fib.step - 1, 1),
+            fourth_fib.output
         );
+        assert_ne!(
+            *trace.trace.get_value(fourth_fib.step, 0),
+            fourth_fib.output
+        );
+        assert_ne!(*trace.trace.get_value(fourth_fib.step, 0), Goldilocks::ZERO);
+
+        let fith_fib = FibonacciClaim {
+            step: 5,
+            output: Goldilocks::from(8),
+        };
+        let trace = fith_fib.trace(&Witness);
+        assert_eq!(trace.trace.length, 8);
+        assert_eq!(trace.trace.width, 2);
+        assert_eq!(*trace.trace.get_value(0, 1), ONE);
+        assert_eq!(
+            *trace.trace.get_value(fith_fib.step - 1, 1),
+            fith_fib.output
+        );
+        assert_ne!(*trace.trace.get_value(fith_fib.step, 0), fith_fib.output);
+        assert_ne!(*trace.trace.get_value(fith_fib.step, 0), Goldilocks::ZERO);
     }
 
     #[test]
@@ -254,13 +304,13 @@ mod test {
         };
         let trace = claim.trace(&Witness);
         let trace_polys = trace.get_trace_polys();
-        let domain = Radix2EvaluationDomain::<Goldilocks>::new(trace.len()).unwrap();
+        let domain = Radix2EvaluationDomain::<Goldilocks>::new(trace.trace.length).unwrap();
 
         // check trace polynomials are computed correctly
         for i in 0..claim.step {
             let row = domain.element(i);
-            assert_eq!(*trace.get_value(i, 0), trace_polys[0].evaluate(&row));
-            assert_eq!(*trace.get_value(i, 1), trace_polys[1].evaluate(&row));
+            assert_eq!(*trace.trace.get_value(i, 0), trace_polys[0].evaluate(&row));
+            assert_eq!(*trace.trace.get_value(i, 1), trace_polys[1].evaluate(&row));
         }
     }
 
@@ -271,9 +321,9 @@ mod test {
             output: Goldilocks::from(3),
         };
         let trace = claim.trace(&Witness);
+        let domain = trace.domain;
         let constrains = trace.derive_constrains();
-        let domain = constrains.get_domain();
-        assert_eq!(constrains.transition_constrains, 2);
+        assert_eq!(constrains.transition_constrains_num, 2);
 
         // boundary_constrains
         let w0 = domain.element(0);
@@ -293,7 +343,7 @@ mod test {
         let sum_constrain = constrains
             .get_constrain_poly(3)
             .mul_by_vanishing_poly(domain);
-        for i in 0..trace.len() - 1 {
+        for i in 0..trace.trace.length - 1 {
             let w_i = domain.element(i);
             assert_eq!(carry_over_constrain.evaluate(&w_i), ZERO);
             assert_eq!(sum_constrain.evaluate(&w_i), ZERO);

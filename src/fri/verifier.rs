@@ -21,9 +21,7 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
-    degree: usize,
     domain_size: usize,
-    blowup_factor: usize,
     rounds: usize,
     commit: MerkleRoot<D>,
     marker: PhantomData<F>,
@@ -39,10 +37,8 @@ where
         let rounds = logarithm_of_two_k::<TREE_WIDTH>(domain_size).unwrap();
 
         Self {
-            degree,
             rounds,
             domain_size,
-            blowup_factor,
             commit,
             marker: PhantomData::<F>,
         }
@@ -82,7 +78,7 @@ where
         arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
     ) -> bool {
         let Transcript(commits, alphas, beta) = self.read_proof_transcript(arthur).unwrap();
-        assert_eq!(1 << commits.len(), (self.degree + 1) * self.blowup_factor);
+        assert_eq!(1 << commits.len(), self.domain_size);
         assert_eq!(self.commit.0, commits[0].0);
         if commits.len() != self.rounds || commits.len() - 1 != proof.points.len() {
             return false;
