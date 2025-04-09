@@ -1,4 +1,4 @@
-use crate::air::{Constrains, Provable, TraceTable};
+use crate::air::{Constrains, Matrix, Provable, TraceTable};
 use crate::fri::FriProof;
 use crate::fri::{fiatshamir::DigestReader, prover::FriProver, verifier::FriVerifier};
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
@@ -53,7 +53,7 @@ where
         // 1. compute trace polys and commit to them
         let trace = air.trace(&witness);
         let trace_polys = trace.get_trace_polys();
-        let mut trace_poly_coeffs = TraceTable::<F>::new(trace.len(), trace.width());
+        let mut trace_poly_coeffs = Matrix::<F>::new(trace.trace.len(), trace_polys.len(), None);
         for (i, poly) in trace_polys.iter().enumerate() {
             trace_poly_coeffs.add_col(i, poly.coeffs.clone());
         }
@@ -62,14 +62,15 @@ where
         merlin.add_bytes(&trace_commit).unwrap();
 
         // TODO: add the coset trick to add zk
-        let lde_domain_size = self.blowup_factor * trace.len();
+        let lde_domain_size = self.blowup_factor * trace_poly_coeffs.len();
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size).unwrap();
         let constrains = trace.derive_constrains();
-        let mut constrain_trace = TraceTable::<F>::new(lde_domain_size, constrains.len());
+        let mut constrain_trace = Matrix::<F>::new(lde_domain_size, constrains.len(), None);
         for (i, poly) in constrains.get_polynomials().into_iter().enumerate() {
             let evals = poly.evaluate_over_domain(lde_domain);
             constrain_trace.add_col(i, evals.evals);
         }
+        println!("Proving: constrain trace {:?}", constrain_trace.get_data());
         let constrain_trace_codeword = MerkleTree::<N, D, F>::new(constrain_trace.get_data());
         let constrain_trace_commit = constrain_trace_codeword.root();
         merlin.add_bytes(&constrain_trace_commit).unwrap();
@@ -87,7 +88,7 @@ where
         assert_eq!(rest, DensePolynomial::zero());
         let validity_lde = validity_poly.clone().evaluate_over_domain(lde_domain);
 
-        let mut validity_trace = TraceTable::<F>::new(lde_domain_size, 1);
+        let mut validity_trace = Matrix::<F>::new(lde_domain_size, 1, None);
         validity_trace.add_col(0, validity_lde.evals);
         let validity_codeword = MerkleTree::<N, D, F>::new(validity_trace.get_data());
         let validity_commit = validity_codeword.root();

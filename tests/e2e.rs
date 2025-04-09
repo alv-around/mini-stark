@@ -35,7 +35,7 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
         trace.add_boundary_constrain(0, 1);
 
         // trace
-        for i in 0..trace.len() {
+        for i in 0..trace.step_number() {
             let c = a + b;
             trace.add_row(i, vec![a, b]);
             a = b;
@@ -83,7 +83,7 @@ fn test_fibonacci_air_constrains() {
     let sum_constrain = constrains
         .get_constrain_poly(3)
         .mul_by_vanishing_poly(domain);
-    for i in 0..trace.len() - 1 {
+    for i in 0..trace.step_number() - 1 {
         let w_i = domain.element(i);
         assert_eq!(carry_over_constrain.evaluate(&w_i), ZERO);
         assert_eq!(sum_constrain.evaluate(&w_i), ZERO);
