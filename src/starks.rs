@@ -150,7 +150,7 @@ where
             fri_proof,
         } = proof;
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&arthur);
-        let domain = Radix2EvaluationDomain::<F>::new(self.degree).unwrap();
+        let domain = Radix2EvaluationDomain::<F>::new(self.degree + 1).unwrap();
 
         // 1. check symbolic link to quotients ??
         assert_eq!(arthur.next_digest().unwrap(), trace_commit);
@@ -160,7 +160,7 @@ where
         // 2. run queries
         // TODO: number of queries dependent of target security. For the moment one query
         let lde_domain =
-            Radix2EvaluationDomain::<F>::new(self.degree * self.blowup_factor).unwrap();
+            Radix2EvaluationDomain::<F>::new(domain.size() * self.blowup_factor).unwrap();
         let zerofier = domain
             .vanishing_polynomial()
             .evaluate_over_domain(lde_domain);
@@ -194,8 +194,7 @@ where
 
         // 3. run fri
         let fri_root = MerkleRoot::<D>(fri_commit);
-        let fri_verifier =
-            FriVerifier::<N, D, F>::new(fri_root, self.degree - 1, self.blowup_factor);
+        let fri_verifier = FriVerifier::<N, D, F>::new(fri_root, self.degree, self.blowup_factor);
         assert!(fri_verifier.verify(fri_proof, &mut arthur));
 
         true

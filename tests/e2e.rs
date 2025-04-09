@@ -95,13 +95,12 @@ fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
     let constrains = trace.derive_constrains();
-    let domain = trace.get_domain();
 
     let io: IOPattern<DigestBridge<Sha256>> =
         StarkIOPattern::<_, Goldilocks>::new_stark(4, 80, "🐺");
     let transcript = io.to_merlin();
 
-    let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2, 80, domain.size());
+    let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2, 80, trace.step_number() - 1);
     let proof = proof_system.prove(transcript, claim, witness).unwrap();
 
     let is_alright = proof_system.verify(io, constrains, proof);
