@@ -1,6 +1,6 @@
 use ark_ff::{AdditiveGroup, Field};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Polynomial};
-use mini_starks::air::*;
+use mini_starks::air::{Provable, TraceTable};
 use mini_starks::fiatshamir::StarkIOPattern;
 use mini_starks::field::Goldilocks;
 use mini_starks::starks::Stark;
@@ -74,7 +74,7 @@ fn test_fibonacci_air_constrains() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
     let constrains = trace.derive_constrains();
-    let domain = constrains.get_domain();
+    let domain = trace.get_domain();
 
     // check output constrain
     let carry_over_constrain = constrains
@@ -95,12 +95,13 @@ fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
     let constrains = trace.derive_constrains();
+    let domain = trace.get_domain();
 
     let io: IOPattern<DigestBridge<Sha256>> =
         StarkIOPattern::<_, Goldilocks>::new_stark(4, 80, "🐺");
     let transcript = io.to_merlin();
 
-    let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2, 80);
+    let proof_system = Stark::<TWO, Sha256, Goldilocks>::new(2, 80, domain.size());
     let proof = proof_system.prove(transcript, claim, witness).unwrap();
 
     let is_alright = proof_system.verify(io, constrains, proof);

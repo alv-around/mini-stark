@@ -6,8 +6,6 @@ use ark_poly::DenseUVPolynomial;
 use ark_poly::EvaluationDomain;
 use ark_std::test_rng;
 
-const TWO: usize = 2;
-
 pub trait Provable<W, F: PrimeField> {
     fn trace(&self, witness: &W) -> TraceTable<F>;
     // fn derive_constrians(&self) -> Constrains<F>;
@@ -37,11 +35,6 @@ impl<F: PrimeField> Matrix<F> {
         }
     }
 
-    fn populate_matrix(&mut self, data: Vec<F>) {
-        assert_eq!(data.len(), self.length * self.width);
-        self.data = data;
-    }
-
     pub(crate) fn get_data(&self) -> &[F] {
         &self.data[..]
     }
@@ -55,7 +48,8 @@ impl<F: PrimeField> Matrix<F> {
         self.length
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.length == 0 || self.width == 0
     }
 
@@ -71,6 +65,7 @@ impl<F: PrimeField> Matrix<F> {
 pub struct TraceTable<F: PrimeField> {
     pub(super) trace: Matrix<F>,
     steps: usize,
+    domain: Radix2EvaluationDomain<F>,
     pub omega: F,
     boundaries: Vec<(usize, usize)>,
     transition_constrains: Vec<Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>>,
@@ -94,6 +89,7 @@ impl<F: PrimeField> TraceTable<F> {
         let boundaries = Vec::new();
         Self {
             steps,
+            domain,
             omega,
             boundaries,
             transition_constrains: Vec::new(),
@@ -103,6 +99,10 @@ impl<F: PrimeField> TraceTable<F> {
 
     pub fn step_number(&self) -> usize {
         self.steps
+    }
+
+    pub fn get_domain(&self) -> Radix2EvaluationDomain<F> {
+        self.domain
     }
 
     pub fn add_row(&mut self, index: usize, row: Vec<F>) {
@@ -126,7 +126,6 @@ impl<F: PrimeField> TraceTable<F> {
     }
 
     pub fn derive_constrains(&self) -> Constrains<F> {
-        let domain = Radix2EvaluationDomain::<F>::new(self.trace.length).unwrap();
         let mut constrains = self.get_trace_polys();
 
         let transition_evals = self
@@ -139,7 +138,6 @@ impl<F: PrimeField> TraceTable<F> {
         let transition_constrains_num = transition_evals.len();
         constrains.extend(transition_evals);
         Constrains {
-            domain,
             trace_constrains_num,
             transition_constrains_num,
             constrains,
@@ -148,15 +146,13 @@ impl<F: PrimeField> TraceTable<F> {
 
     // compute trace polynomials
     pub(crate) fn get_trace_polys(&self) -> Vec<DensePolynomial<F>> {
-        let domain = Radix2EvaluationDomain::<F>::new(self.trace.length).unwrap();
-
         let mut trace_polys = Vec::with_capacity(self.trace.width);
         for i in 0..self.trace.width {
             // derive trace polys
             let evaluations = (0..self.trace.length)
                 .map(|j| *self.trace.get_value(j, i))
                 .collect::<Vec<_>>();
-            let coeffs = domain.ifft(&evaluations);
+            let coeffs = self.domain.ifft(&evaluations);
             let column_poly = DensePolynomial::from_coefficients_vec(coeffs);
             trace_polys.push(column_poly);
         }
@@ -166,7 +162,6 @@ impl<F: PrimeField> TraceTable<F> {
 }
 
 pub struct Constrains<F: PrimeField> {
-    pub domain: Radix2EvaluationDomain<F>,
     trace_constrains_num: usize,
     transition_constrains_num: usize,
     constrains: Vec<DensePolynomial<F>>,
@@ -184,10 +179,6 @@ impl<F: PrimeField> Constrains<F> {
 
     pub fn get_polynomials(&self) -> Vec<DensePolynomial<F>> {
         self.constrains.clone()
-    }
-
-    pub fn get_domain(&self) -> Radix2EvaluationDomain<F> {
-        self.domain
     }
 }
 
@@ -330,8 +321,8 @@ mod test {
             output: Goldilocks::from(3),
         };
         let trace = claim.trace(&Witness);
+        let domain = trace.domain;
         let constrains = trace.derive_constrains();
-        let domain = constrains.get_domain();
         assert_eq!(constrains.transition_constrains_num, 2);
 
         // boundary_constrains
