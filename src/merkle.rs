@@ -18,10 +18,10 @@ pub trait Tree {
 
 #[derive(Clone)]
 pub struct MerkleTreeConfig<D: Digest, F: PrimeField> {
-    leafs_per_node: usize,
-    inner_children: usize,
-    _digest: PhantomData<D>,
-    _field: PhantomData<F>,
+    pub leafs_per_node: usize,
+    pub inner_children: usize,
+    pub _digest: PhantomData<D>,
+    pub _field: PhantomData<F>,
 }
 
 #[derive(Clone)]
