@@ -138,7 +138,11 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
             std::cmp::Ordering::Greater => panic!("index outside of tree length"),
             std::cmp::Ordering::Equal => panic!("index is root node"),
             std::cmp::Ordering::Less => {
-                index + (self.get_node_number() - index + 1) / self.config.inner_children
+                if index < self.leafs.len() {
+                    self.leafs.len() + index / self.config.leafs_per_node
+                } else {
+                    index + (self.get_node_number() - index + 1) / self.config.inner_children
+                }
             }
         }
     }
@@ -244,6 +248,13 @@ mod test {
         _field: PhantomData::<Goldilocks>,
     };
 
+    const TWO_FOUR: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+        leafs_per_node: 4,
+        inner_children: 2,
+        _digest: PhantomData::<Sha256>,
+        _field: PhantomData::<Goldilocks>,
+    };
+
     const FOUR: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
         leafs_per_node: 4,
         inner_children: 4,
@@ -285,6 +296,11 @@ mod test {
         assert_eq!(tree.leafs.len(), 16);
         assert_eq!(tree.nodes.len(), 15);
 
+        let tree = make_tree(TWO_FOUR);
+        assert_eq!(tree.get_node_number(), 23);
+        assert_eq!(tree.leafs.len(), 16);
+        assert_eq!(tree.nodes.len(), 7);
+
         let tree = make_tree(FOUR);
         assert_eq!(tree.get_node_number(), 21);
         assert_eq!(tree.leafs.len(), 16);
@@ -299,6 +315,10 @@ mod test {
     #[test]
     fn test_neighbor_index() {
         let tree = make_tree(TWO);
+        assert_eq!(tree.get_neighbor_idx(4), 4..6);
+        assert_eq!(tree.get_neighbor_idx(7), 6..8);
+
+        let tree = make_tree(TWO_FOUR);
         assert_eq!(tree.get_neighbor_idx(4), 4..6);
         assert_eq!(tree.get_neighbor_idx(7), 6..8);
 
@@ -333,6 +353,21 @@ mod test {
         // fourth level ..
         assert_eq!(tree.get_parent_idx(28), 30);
         assert_eq!(tree.get_parent_idx(29), 30);
+
+        let tree = make_tree(TWO_FOUR);
+        // first level test
+        assert_eq!(tree.get_parent_idx(1), 16);
+        assert_eq!(tree.get_parent_idx(4), 17);
+        assert_eq!(tree.get_parent_idx(9), 18);
+        assert_eq!(tree.get_parent_idx(13), 19);
+        // second level ..
+        assert_eq!(tree.get_parent_idx(16), 20);
+        assert_eq!(tree.get_parent_idx(17), 20);
+        assert_eq!(tree.get_parent_idx(18), 21);
+        assert_eq!(tree.get_parent_idx(19), 21);
+        // third level ..
+        assert_eq!(tree.get_parent_idx(20), 22);
+        assert_eq!(tree.get_parent_idx(21), 22);
 
         // test that calling and index out of tree length panics
         let result = panic::catch_unwind(|| {
