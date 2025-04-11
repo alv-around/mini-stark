@@ -18,7 +18,7 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     arthur: Vec<u8>,
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
-    constrain_queries: Vec<Vec<MerklePath<D, F>>>,
+    constrain_queries: Vec<MerklePath<D, F>>,
     validity_commit: Hash<D>,
     validity_queries: Vec<(F, MerklePath<D, F>)>,
     fri_commit: Hash<D>,
@@ -102,13 +102,9 @@ where
         let mut validity_queries = Vec::new();
         for query in queries.into_iter() {
             // constrain queries
-            let mut query_constrain_queries = Vec::new();
-            for i in 0..constrains.len() {
-                let leaf = constrain_trace.get_value(query, i);
-                let path = constrain_trace_codeword.generate_proof(leaf).unwrap();
-                query_constrain_queries.push(path);
-            }
-            constrain_queries.push(query_constrain_queries);
+            let leaf = constrain_trace.get_value(query, 0);
+            let path = constrain_trace_codeword.generate_proof(leaf).unwrap();
+            constrain_queries.push(path);
 
             // validity query
             let leaf = validity_trace.get_value(query, 0);
@@ -177,12 +173,15 @@ where
             let (v_x, path) = validity_queries[i].clone();
             assert!(validity_root.check_proof(&v_x, path));
 
+            let path = constrain_queries[i].clone();
             let mut c_x = DensePolynomial::zero();
-            for (j, path) in constrain_queries[i].iter().enumerate() {
-                let constrain = constrains.get_constrain_poly(j);
+            for (i, constrain) in constrains.get_polynomials().iter().enumerate() {
                 let w_i = lde_domain.element(query);
                 let leaf = constrain.evaluate(&w_i);
-                assert!(quotient_root.check_proof(&leaf, path.clone()));
+                assert!(path.proof_contains_leaf(&leaf));
+                if i == 0 {
+                    assert!(quotient_root.check_proof(&leaf, path.clone()));
+                }
 
                 c_x = c_x
                     + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;

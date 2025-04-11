@@ -201,6 +201,12 @@ pub struct MerklePath<D: Digest, F: PrimeField> {
     path: Vec<Vec<Hash<D>>>,
 }
 
+impl<D: Digest, F: PrimeField> MerklePath<D, F> {
+    pub fn proof_contains_leaf(&self, leaf: &F) -> bool {
+        self.leaf_neighbours.contains(leaf)
+    }
+}
+
 pub struct MerkleRoot<D: Digest>(pub Hash<D>);
 
 impl<D: Digest> MerkleRoot<D> {
