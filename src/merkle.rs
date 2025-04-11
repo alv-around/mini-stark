@@ -1,74 +1,92 @@
 use crate::{util::logarithm_of_two_k, Hash};
 use ark_ff::PrimeField;
 use digest::Digest;
-use std::ops::Range;
+use std::marker::PhantomData;
 
-pub trait Tree<const N: usize> {
+pub trait Tree {
     type Input;
     type Inner;
+    type Config;
 
-    fn new(inputs: &[Self::Input]) -> Self;
+    fn new(inputs: &[Self::Input], config: Self::Config) -> Self;
     fn root(&self) -> Self::Inner;
     fn get_node_number(&self) -> usize;
-    // fn get_parent(&self, node: &Self::Inner) -> &Self::Inner;
-    // fn get_children(&self, node: &Self::Inner) -> &[Self::Inner; N];
     fn calculate_from_leafs(children: &[Self::Input]) -> Self::Inner;
     fn calculate_from_nodes(children: &[Self::Inner]) -> Self::Inner;
 }
 
 #[derive(Clone)]
-pub struct MerkleTree<const N: usize, D: Digest, F: PrimeField> {
+pub struct MerkleTreeConfig<D: Digest, F: PrimeField> {
+    pub leafs_per_node: usize,
+    pub inner_children: usize,
+    pub _digest: PhantomData<D>,
+    pub _field: PhantomData<F>,
+}
+
+#[derive(Clone)]
+pub struct MerkleTree<D: Digest, F: PrimeField> {
     leafs: Vec<F>,
     nodes: Vec<Hash<D>>,
+    config: MerkleTreeConfig<D, F>,
     levels: usize,
 }
 
-impl<const N: usize, D: Digest, F: PrimeField> Tree<N> for MerkleTree<N, D, F> {
+impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
     type Input = F;
     type Inner = Hash<D>;
+    type Config = MerkleTreeConfig<D, F>;
 
-    fn new(inputs: &[F]) -> Self {
+    fn new(inputs: &[F], config: MerkleTreeConfig<D, F>) -> Self {
+        let MerkleTreeConfig {
+            leafs_per_node,
+            inner_children,
+            _digest,
+            _field,
+        } = config;
+
         let leaf_num = inputs.len();
-        let levels = match logarithm_of_two_k::<N>(leaf_num) {
-            Ok(log) => log,
+        let node_num = leaf_num / leafs_per_node;
+        let levels = match logarithm_of_two_k(node_num, inner_children) {
+            Ok(log) => log + 1,
             Err(error_str) => panic!("{}", error_str),
         };
 
-        // assert tree is full
         assert_eq!(
-            N.pow(levels as u32),
+            inner_children.pow((levels - 1) as u32) * leafs_per_node,
             leaf_num,
-            "Tree is not full! input length must be a power of {N}"
+            "Tree is not full! input length must be a power of {inner_children}"
         );
 
         // number of nodes
-        let numerator = 1 - (N as i64).pow(levels as u32);
-        let denominator = 1 - N as i64;
+        let numerator = 1 - (inner_children as i64).pow(levels as u32);
+        let denominator = 1 - inner_children as i64;
         let node_num = (numerator / denominator) as usize;
         let mut nodes = Vec::with_capacity(node_num);
         println!("Number of nodes in the tree: {node_num}");
 
         let mut distance = leaf_num;
-        for external in inputs.chunks(N) {
-            let parent = MerkleTree::<N, D, _>::calculate_from_leafs(external);
+        for external in inputs.chunks(leafs_per_node) {
+            let parent = Self::calculate_from_leafs(external);
             nodes.push(parent);
-            distance -= N - 1;
+            distance -= leafs_per_node - 1;
         }
 
-        let mut current_nodes = leaf_num / N;
+        let mut current_nodes = leaf_num / leafs_per_node;
+        println!("current_nodes: {}", current_nodes);
         let nodes_left = node_num - current_nodes;
         for _ in 0..nodes_left {
             let idx = current_nodes - distance;
-            let children = &nodes[idx..idx + N];
-            let parent = MerkleTree::<N, D, F>::calculate_from_nodes(children);
+            let children = &nodes[idx..idx + inner_children];
+            let parent = Self::calculate_from_nodes(children);
             nodes.push(parent);
-            distance -= N - 1;
+            distance -= inner_children - 1;
             current_nodes += 1;
         }
 
         Self {
             leafs: inputs.to_vec(),
             nodes,
+            config,
             levels,
         }
     }
@@ -99,26 +117,20 @@ impl<const N: usize, D: Digest, F: PrimeField> Tree<N> for MerkleTree<N, D, F> {
     }
 }
 
-impl<const N: usize, F: PrimeField, D: Digest> MerkleTree<N, D, F> {
-    // TODO: better error handling
-    fn get_neighbor_idx(&self, index: usize) -> Range<usize> {
-        if index >= self.get_node_number() {
-            panic!("index outside of tree length");
-        }
-
-        let remainder = index % N;
-        let start_idx = index - remainder;
-        let end_idx = start_idx + N;
-        start_idx..end_idx
-    }
-
+impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     // TODO: better error handling
     fn get_parent_idx(&self, index: usize) -> usize {
         let root_idx = self.get_node_number() - 1;
         match index.cmp(&root_idx) {
             std::cmp::Ordering::Greater => panic!("index outside of tree length"),
             std::cmp::Ordering::Equal => panic!("index is root node"),
-            std::cmp::Ordering::Less => index + (self.get_node_number() - index + 1) / N,
+            std::cmp::Ordering::Less => {
+                if index < self.leafs.len() {
+                    self.leafs.len() + index / self.config.leafs_per_node
+                } else {
+                    index + (self.get_node_number() - index + 1) / self.config.inner_children
+                }
+            }
         }
     }
 
@@ -132,17 +144,22 @@ impl<const N: usize, F: PrimeField, D: Digest> MerkleTree<N, D, F> {
     }
 
     fn get_leaf_neighbours(&self, index: usize) -> Vec<F> {
-        let neighbors_idx = self.get_neighbor_idx(index);
-        self.leafs[neighbors_idx].to_vec()
+        let num_neighbors = self.config.leafs_per_node;
+        let remainder = index % num_neighbors;
+        let start_idx = index - remainder;
+        let end_idx = start_idx + num_neighbors;
+        self.leafs[start_idx..end_idx].to_vec()
     }
 
     fn get_inner_neighbours(&self, index: usize) -> Vec<Hash<D>> {
         let shifted_index = index - self.leafs.len();
-        let neighbors_idx = self.get_neighbor_idx(shifted_index);
-        self.nodes[neighbors_idx].to_vec()
+        let num_neighbors = self.config.inner_children;
+        let remainder = shifted_index % num_neighbors;
+        let start_idx = shifted_index - remainder;
+        let end_idx = start_idx + num_neighbors;
+        self.nodes[start_idx..end_idx].to_vec()
     }
 
-    // TODO: add const LogN to code
     fn calculate_path(&self, index: usize) -> Vec<Vec<Hash<D>>> {
         let mut path = Vec::new();
         let mut current_idx = index;
@@ -151,7 +168,6 @@ impl<const N: usize, F: PrimeField, D: Digest> MerkleTree<N, D, F> {
             path.push(neighbor);
 
             let parent = self.get_parent_idx(current_idx);
-            println!("current idx: {}, parent: {}", current_idx, parent);
             current_idx = parent;
         }
 
@@ -167,6 +183,10 @@ impl<const N: usize, F: PrimeField, D: Digest> MerkleTree<N, D, F> {
 
         let leaf_neighbours = self.get_leaf_neighbours(leaf_index);
         let leaf_parent = self.get_parent_idx(leaf_index);
+        println!(
+            "leaf_idx: {} leaf parent: {} leaf_neighbours: {:?}",
+            leaf_index, leaf_parent, leaf_neighbours
+        );
         let path = self.calculate_path(leaf_parent);
         Ok(MerklePath {
             leaf_neighbours,
@@ -181,26 +201,28 @@ pub struct MerklePath<D: Digest, F: PrimeField> {
     path: Vec<Vec<Hash<D>>>,
 }
 
+impl<D: Digest, F: PrimeField> MerklePath<D, F> {
+    pub fn proof_contains_leaf(&self, leaf: &F) -> bool {
+        self.leaf_neighbours.contains(leaf)
+    }
+}
+
 pub struct MerkleRoot<D: Digest>(pub Hash<D>);
 
 impl<D: Digest> MerkleRoot<D> {
-    pub fn check_proof<const N: usize, F: PrimeField>(
-        &self,
-        leaf: &F,
-        proof: MerklePath<D, F>,
-    ) -> bool {
+    pub fn check_proof<F: PrimeField>(&self, leaf: &F, proof: MerklePath<D, F>) -> bool {
         if !proof.leaf_neighbours.contains(leaf) {
             return false;
         };
 
-        let mut previous = MerkleTree::<N, D, F>::calculate_from_leafs(&proof.leaf_neighbours);
+        let mut previous = MerkleTree::<D, F>::calculate_from_leafs(&proof.leaf_neighbours);
 
         for (i, level) in proof.path.iter().enumerate() {
             if !level.contains(&previous) {
                 return false;
             }
 
-            previous = MerkleTree::<N, D, F>::calculate_from_nodes(level);
+            previous = MerkleTree::<D, F>::calculate_from_nodes(level);
             println!("Merkle Verification: Round {i} done");
         }
 
@@ -220,14 +242,37 @@ mod test {
 
     use std::panic;
 
-    const TWO: usize = 2;
-    const FOUR: usize = 4;
-    const EIGHT: usize = 8;
-    const SIXTEEN: usize = 16;
+    const TWO: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+        leafs_per_node: 2,
+        inner_children: 2,
+        _digest: PhantomData::<Sha256>,
+        _field: PhantomData::<Goldilocks>,
+    };
 
-    fn make_tree<const N: usize>() -> MerkleTree<N, Sha256, Goldilocks> {
+    const TWO_FOUR: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+        leafs_per_node: 4,
+        inner_children: 2,
+        _digest: PhantomData::<Sha256>,
+        _field: PhantomData::<Goldilocks>,
+    };
+
+    const FOUR: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+        leafs_per_node: 4,
+        inner_children: 4,
+        _digest: PhantomData::<Sha256>,
+        _field: PhantomData::<Goldilocks>,
+    };
+
+    const SIXTEEN: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+        leafs_per_node: 16,
+        inner_children: 16,
+        _digest: PhantomData::<Sha256>,
+        _field: PhantomData::<Goldilocks>,
+    };
+
+    fn make_tree(config: MerkleTreeConfig<Sha256, Goldilocks>) -> MerkleTree<Sha256, Goldilocks> {
         let leafs: Vec<Goldilocks> = (0..16).map(Goldilocks::from).collect();
-        MerkleTree::<N, Sha256, _>::new(&leafs)
+        MerkleTree::<Sha256, _>::new(&leafs, config)
     }
 
     #[test]
@@ -240,63 +285,38 @@ mod test {
 
         // TODO: write macro to avoid code repetition
         let result = panic::catch_unwind(|| {
-            MerkleTree::<TWO, Sha256, _>::new(&leafs);
+            MerkleTree::<Sha256, _>::new(&leafs, TWO);
         });
-        assert!(result.is_err(), "Tree of width: {} to panic", TWO);
-
-        let result = panic::catch_unwind(|| {
-            MerkleTree::<FOUR, Sha256, _>::new(&leafs);
-        });
-        assert!(result.is_err(), "Tree of width: {} to panic", FOUR);
-
-        let result = panic::catch_unwind(|| {
-            MerkleTree::<EIGHT, Sha256, _>::new(&leafs);
-        });
-        assert!(result.is_err(), "Tree of width: {} to panic", EIGHT);
-
-        let result = panic::catch_unwind(|| {
-            MerkleTree::<SIXTEEN, Sha256, _>::new(&leafs);
-        });
-        assert!(result.is_err(), "Tree of width: {} to panic", SIXTEEN);
+        assert!(result.is_err(), "Tree of width: 2 to panic");
     }
 
     #[test]
     fn test_node_calculation() {
-        let tree = make_tree::<TWO>();
+        let tree = make_tree(TWO);
         assert_eq!(tree.get_node_number(), 31);
         assert_eq!(tree.leafs.len(), 16);
         assert_eq!(tree.nodes.len(), 15);
 
-        let tree = make_tree::<FOUR>();
+        let tree = make_tree(TWO_FOUR);
+        assert_eq!(tree.get_node_number(), 23);
+        assert_eq!(tree.leafs.len(), 16);
+        assert_eq!(tree.nodes.len(), 7);
+
+        let tree = make_tree(FOUR);
         assert_eq!(tree.get_node_number(), 21);
         assert_eq!(tree.leafs.len(), 16);
         assert_eq!(tree.nodes.len(), 5);
 
-        let tree = make_tree::<SIXTEEN>();
+        let tree = make_tree(SIXTEEN);
         assert_eq!(tree.get_node_number(), 17);
         assert_eq!(tree.leafs.len(), 16);
         assert_eq!(tree.nodes.len(), 1);
     }
 
-    #[test]
-    fn test_neighbor_index() {
-        let tree = make_tree::<TWO>();
-        assert_eq!(tree.get_neighbor_idx(4), 4..6);
-        assert_eq!(tree.get_neighbor_idx(7), 6..8);
-
-        let tree = make_tree::<FOUR>();
-        assert_eq!(tree.get_neighbor_idx(4), 4..8);
-        assert_eq!(tree.get_neighbor_idx(7), 4..8);
-
-        let tree = make_tree::<SIXTEEN>();
-        assert_eq!(tree.get_neighbor_idx(4), 0..16);
-        assert_eq!(tree.get_neighbor_idx(7), 0..16);
-    }
-
     // TODO:use macro to test all configs
     #[test]
     fn test_merkle_tree_parent_index() {
-        let tree = make_tree::<TWO>();
+        let tree = make_tree(TWO);
         // first level test
         assert_eq!(tree.get_parent_idx(1), 16);
         assert_eq!(tree.get_parent_idx(4), 18);
@@ -316,6 +336,21 @@ mod test {
         assert_eq!(tree.get_parent_idx(28), 30);
         assert_eq!(tree.get_parent_idx(29), 30);
 
+        let tree = make_tree(TWO_FOUR);
+        // first level test
+        assert_eq!(tree.get_parent_idx(1), 16);
+        assert_eq!(tree.get_parent_idx(4), 17);
+        assert_eq!(tree.get_parent_idx(9), 18);
+        assert_eq!(tree.get_parent_idx(13), 19);
+        // second level ..
+        assert_eq!(tree.get_parent_idx(16), 20);
+        assert_eq!(tree.get_parent_idx(17), 20);
+        assert_eq!(tree.get_parent_idx(18), 21);
+        assert_eq!(tree.get_parent_idx(19), 21);
+        // third level ..
+        assert_eq!(tree.get_parent_idx(20), 22);
+        assert_eq!(tree.get_parent_idx(21), 22);
+
         // test that calling and index out of tree length panics
         let result = panic::catch_unwind(|| {
             tree.get_parent_idx(tree.get_node_number());
@@ -326,12 +361,22 @@ mod test {
     // TODO: modify python script to reproduce hashing outcomes
     #[test]
     fn test_check_proof() {
-        let tree = make_tree::<TWO>();
+        let tree = make_tree(TWO);
         let root = tree.root();
 
         let f_one = Goldilocks::from(7);
         let proof = tree.generate_proof(&f_one).unwrap();
+        assert_eq!(proof.path.len(), 3);
         println!("Proof: {:?}", proof);
-        assert!(MerkleRoot::<Sha256>(root).check_proof::<TWO, Goldilocks>(&f_one, proof));
+        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(&f_one, proof));
+
+        let tree = make_tree(TWO_FOUR);
+        let root = tree.root();
+
+        let f_one = Goldilocks::from(7);
+        let proof = tree.generate_proof(&f_one).unwrap();
+        assert_eq!(proof.path.len(), 2);
+        println!("Proof: {:?}", proof);
+        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(&f_one, proof));
     }
 }

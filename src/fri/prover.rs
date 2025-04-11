@@ -1,5 +1,5 @@
-use super::FriProof;
-use crate::merkle::{MerklePath, MerkleTree, Tree};
+use super::{FriConfig, FriProof};
+use crate::merkle::{MerklePath, MerkleTree, MerkleTreeConfig, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -12,17 +12,17 @@ use nimue::plugins::ark::FieldChallenges;
 use nimue::DigestBridge;
 use nimue::{ByteChallenges, ByteWriter, Merlin};
 
-pub struct FriProver<'a, const TREE_WIDH: usize, D: Digest, F: PrimeField>
+pub struct FriProver<'a, D: Digest, F: PrimeField>
 where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
     round_num: usize,
     transcript: &'a mut Merlin<DigestBridge<D>>,
-    rounds: Vec<FriRound<TREE_WIDH, D, F>>,
+    rounds: Vec<FriRound<D, F>>,
 }
 
-impl<'a, const W: usize, D, F> FriProver<'a, W, D, F>
+impl<'a, D, F> FriProver<'a, D, F>
 where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
@@ -30,8 +30,12 @@ where
     pub fn new(
         transcript: &'a mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
-        blowup_factor: usize,
+        config: FriConfig<D, F>,
     ) -> Self {
+        let FriConfig {
+            merkle_config,
+            blowup_factor,
+        } = config;
         let d = poly.degree();
         let domain = Radix2EvaluationDomain::<F>::new(d * blowup_factor).unwrap();
         let domain_size = domain.size as usize;
@@ -49,8 +53,8 @@ where
             println!("FRI: degree padding performed");
         }
 
-        let mut rounds = Vec::<FriRound<W, D, F>>::with_capacity(round_num);
-        let first_round = FriRound::new(poly_offset, domain_size);
+        let mut rounds = Vec::<FriRound<D, F>>::with_capacity(round_num);
+        let first_round = FriRound::new(poly_offset, domain_size, merkle_config);
         rounds.push(first_round);
 
         Self {
@@ -69,21 +73,26 @@ where
         assert_eq!(self.rounds.len(), 1);
 
         let mut commits = Vec::new();
+        println!("number of rounds: {}", self.round_num);
         for i in 1..self.round_num {
             let previous_round = &self.rounds[i - 1];
             let commit = previous_round.commit.root();
             self.transcript.add_bytes(&commit).unwrap();
             commits.push(commit);
+            let previous_round_config = previous_round.config.clone();
 
             let alpha: [F; 1] = self.transcript.challenge_scalars().unwrap();
-            let folded_poly =
-                FriRound::<W, D, _>::split_and_fold(&previous_round.poly.clone(), alpha[0]);
+            let folded_poly = FriRound::<D, _>::split_and_fold(
+                &previous_round.poly.clone(),
+                alpha[0],
+                previous_round_config.inner_children,
+            );
             let domain_size = folded_poly.degree() + 1;
 
             println!("previous poly round coeffs: {:?}", previous_round.poly);
             println!("foded poly coeffs: {:?}", folded_poly);
             println!("folded poly degree:{}", folded_poly.degree());
-            let round = FriRound::<W, D, _>::new(folded_poly, domain_size);
+            let round = FriRound::<D, _>::new(folded_poly, domain_size, previous_round_config);
             self.rounds.push(round);
         }
 
@@ -113,8 +122,12 @@ where
         let mut previous_poly = &previous_round.poly;
         let mut previous_commit = &previous_round.commit;
         let mut previous_domain = &previous_round.domain;
+        let config = previous_round.config.clone();
         for round in rounds_iter {
-            assert_eq!(previous_domain.size() / W, round.domain.size());
+            assert_eq!(
+                previous_domain.size() / config.inner_children,
+                round.domain.size()
+            );
 
             let x1 = previous_domain.element(beta);
             let x2 = previous_domain.element(round.domain.size() + beta);
@@ -133,7 +146,7 @@ where
 
             // q(x) = f(x) - g(x) / Z(x)
             let numerator = previous_poly.clone() - g;
-            let vanishing_poly = FriProver::<W, D, F>::calculate_vanishing_poly(&[x1, x2]);
+            let vanishing_poly = FriProver::<D, F>::calculate_vanishing_poly(&[x1, x2]);
             let q = numerator / vanishing_poly;
             println!("quotient: {:?}", q);
             quotients.push(q.to_vec());
@@ -182,31 +195,42 @@ where
 }
 
 #[derive(Clone)]
-struct FriRound<const TREE_WIDH: usize, D: Digest, F: PrimeField> {
+struct FriRound<D: Digest, F: PrimeField> {
     poly: DensePolynomial<F>,
-    commit: MerkleTree<TREE_WIDH, D, F>,
+    commit: MerkleTree<D, F>,
     domain: Radix2EvaluationDomain<F>,
+    config: MerkleTreeConfig<D, F>,
 }
 
-impl<const W: usize, D: Digest, F: PrimeField> FriRound<W, D, F> {
-    fn new(poly: DensePolynomial<F>, domain_size: usize) -> Self {
+impl<D, F> FriRound<D, F>
+where
+    D: Digest + FixedOutputReset + BlockSizeUser + Clone,
+    F: PrimeField,
+{
+    fn new(poly: DensePolynomial<F>, domain_size: usize, config: MerkleTreeConfig<D, F>) -> Self {
         let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
-        let commit = FriRound::<W, D, F>::codeword_commit(&poly, domain);
+        let config_clone = config.clone();
+        let commit = FriRound::<D, F>::codeword_commit(&poly, domain, config_clone);
 
         Self {
             commit,
             poly,
             domain,
+            config,
         }
     }
 
-    fn split_and_fold(poly: &DensePolynomial<F>, alpha: F) -> DensePolynomial<F> {
+    fn split_and_fold(
+        poly: &DensePolynomial<F>,
+        alpha: F,
+        split_factor: usize,
+    ) -> DensePolynomial<F> {
         let mut coeffs_vectors = Vec::<Vec<F>>::new();
-        for _ in 0..W {
+        for _ in 0..split_factor {
             coeffs_vectors.push(Vec::<F>::new());
         }
         for (i, element) in poly.coeffs().iter().enumerate() {
-            let index = i % W;
+            let index = i % split_factor;
             coeffs_vectors[index].push(*element);
         }
 
@@ -226,9 +250,10 @@ impl<const W: usize, D: Digest, F: PrimeField> FriRound<W, D, F> {
     fn codeword_commit(
         poly: &DensePolynomial<F>,
         domain: Radix2EvaluationDomain<F>,
-    ) -> MerkleTree<W, D, F> {
+        config: MerkleTreeConfig<D, F>,
+    ) -> MerkleTree<D, F> {
         let leafs = poly.evaluate_over_domain_by_ref(domain);
-        MerkleTree::<W, D, _>::new(&leafs.evals)
+        MerkleTree::<D, _>::new(&leafs.evals, config)
     }
 }
 
@@ -239,18 +264,28 @@ mod test {
     use crate::fri::fiatshamir::FriIOPattern;
     use nimue::IOPattern;
     use sha2::{self, Sha256};
-
-    const TWO: usize = 2;
+    use std::marker::PhantomData;
 
     #[test]
     fn test_fri_prover_new() {
-        let blowup_factor = 2usize;
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let io: IOPattern<DigestBridge<Sha256>> = FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
         let mut transcript = io.to_merlin();
 
-        let fri = FriProver::<TWO, Sha256, _>::new(&mut transcript, poly, blowup_factor);
+        let merkle_config = MerkleTreeConfig {
+            leafs_per_node: 2,
+            inner_children: 2,
+            _digest: PhantomData::<Sha256>,
+            _field: PhantomData::<Goldilocks>,
+        };
+
+        let config = FriConfig {
+            merkle_config,
+            blowup_factor: 2,
+        };
+
+        let fri = FriProver::new(&mut transcript, poly, config);
         assert_eq!(fri.round_num, 3);
 
         let _proof = fri.prove();
