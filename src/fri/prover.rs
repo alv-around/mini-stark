@@ -73,6 +73,7 @@ where
         assert_eq!(self.rounds.len(), 1);
 
         let mut commits = Vec::new();
+        println!("number of rounds: {}", self.round_num);
         for i in 1..self.round_num {
             let previous_round = &self.rounds[i - 1];
             let commit = previous_round.commit.root();

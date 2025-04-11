@@ -8,8 +8,8 @@ use digest::Digest;
 
 #[derive(Clone)]
 pub struct FriConfig<D: Digest, F: PrimeField> {
-    merkle_config: MerkleTreeConfig<D, F>,
-    blowup_factor: usize,
+    pub(crate) merkle_config: MerkleTreeConfig<D, F>,
+    pub(crate) blowup_factor: usize,
 }
 
 #[derive(Clone)]

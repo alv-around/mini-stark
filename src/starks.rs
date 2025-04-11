@@ -1,7 +1,8 @@
 use crate::air::{Constrains, Matrix, Provable};
-use crate::fri::FriProof;
+use crate::fiatshamir::StarkIOPattern;
 use crate::fri::{fiatshamir::DigestReader, prover::FriProver, verifier::FriVerifier};
-use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, Tree};
+use crate::fri::{FriConfig, FriProof};
+use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
 use crate::Hash;
 use ark_ff::{PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
@@ -9,7 +10,7 @@ use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2Evaluation
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
 use nimue::plugins::ark::FieldChallenges;
-use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, IOPattern, Merlin};
+use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, IOPattern};
 use std::error::Error;
 use std::marker::PhantomData;
 
@@ -24,43 +25,35 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     fri_proof: FriProof<D, F>,
 }
 
-pub struct Stark<const N: usize, D: Digest, F: PrimeField> {
-    degree: usize,
-    blowup_factor: usize,
-    query_num: usize,
-    field: PhantomData<F>,
-    digest: PhantomData<D>,
-}
+pub struct Stark<D, F>(StarkConfig<D, F>)
+where
+    F: PrimeField,
+    D: Digest + FixedOutputReset + BlockSizeUser + Clone;
 
-impl<const N: usize, D, F> Stark<N, D, F>
+impl<D, F> Stark<D, F>
 where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
-    pub fn new(blowup_factor: usize, query_num: usize, degree: usize) -> Self {
-        Self {
-            degree,
-            blowup_factor,
-            query_num,
-            field: PhantomData,
-            digest: PhantomData,
-        }
+    pub fn new(config: StarkConfig<D, F>) -> Self {
+        Self(config)
     }
     pub fn prove<T, AIR: Provable<T, F>>(
         &self,
-        mut merlin: Merlin<DigestBridge<D>>,
         air: AIR,
         witness: T,
     ) -> Result<StarkProof<D, F>, Box<dyn Error>> {
+        let mut merlin = self.0.io.to_merlin();
         // 1. compute trace polys and commit to them
         let trace = air.trace(&witness);
         let trace_domain = trace.get_domain();
-        let trace_codeword = MerkleTree::<N, D, F>::new(trace.trace.get_data());
+        let trace_codeword =
+            MerkleTree::<D, F>::new(trace.trace.get_data(), self.0.merkle_config.clone());
         let trace_commit = trace_codeword.root();
         merlin.add_bytes(&trace_commit).unwrap();
 
         // TODO: add the coset trick to add zk
-        let lde_domain_size = self.blowup_factor * trace.trace.len();
+        let lde_domain_size = self.0.blowup_factor * trace.trace.len();
         let [random_shift]: [F; 1] = merlin.challenge_scalars().unwrap();
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size)
             .unwrap()
@@ -72,7 +65,8 @@ where
             let evals = poly.evaluate_over_domain(lde_domain);
             constrain_trace.add_col(i, evals.evals);
         }
-        let constrain_trace_codeword = MerkleTree::<N, D, F>::new(constrain_trace.get_data());
+        let constrain_trace_codeword =
+            MerkleTree::<D, F>::new(constrain_trace.get_data(), self.0.merkle_config.clone());
         let constrain_trace_commit = constrain_trace_codeword.root();
         merlin.add_bytes(&constrain_trace_commit).unwrap();
 
@@ -90,11 +84,14 @@ where
 
         let mut validity_trace = Matrix::<F>::new(lde_domain_size, 1, None);
         validity_trace.add_col(0, validity_lde.evals);
-        let validity_codeword = MerkleTree::<N, D, F>::new(validity_trace.get_data());
+        let validity_codeword = MerkleTree::<D, F>::new(
+            validity_trace.get_data(),
+            self.0.fri_config.merkle_config.clone(),
+        );
         let validity_commit = validity_codeword.root();
 
         // 2. Queries
-        let mut query_bytes = vec![0u8; 8 * self.query_num];
+        let mut query_bytes = vec![0u8; 8 * self.0.query_num];
         merlin.fill_challenge_bytes(&mut query_bytes).unwrap();
         let queries = query_bytes
             .chunks_exact_mut(8)
@@ -120,7 +117,7 @@ where
         }
 
         // 3. Make the low degree test FRI
-        let prover = FriProver::<N, D, _>::new(&mut merlin, validity_poly, 2);
+        let prover = FriProver::<D, _>::new(&mut merlin, validity_poly, self.0.fri_config.clone());
         let fri_commit = prover.get_initial_commit();
         let (fri_proof, _) = prover.prove();
 
@@ -137,12 +134,7 @@ where
         })
     }
 
-    pub fn verify(
-        &self,
-        transcript: IOPattern<DigestBridge<D>>,
-        constrains: Constrains<F>,
-        proof: StarkProof<D, F>,
-    ) -> bool {
+    pub fn verify(&self, constrains: Constrains<F>, proof: StarkProof<D, F>) -> bool {
         let StarkProof {
             arthur,
             trace_commit,
@@ -153,18 +145,18 @@ where
             fri_commit,
             fri_proof,
         } = proof;
-        let mut arthur: Arthur<'_, DigestBridge<D>, u8> = transcript.to_arthur(&arthur);
+        let mut arthur: Arthur<'_, DigestBridge<D>, u8> = self.0.io.to_arthur(&arthur);
         assert_eq!(arthur.next_digest().unwrap(), trace_commit);
 
         let [shift]: [F; 1] = arthur.challenge_scalars().unwrap();
-        let domain = Radix2EvaluationDomain::<F>::new(self.degree + 1).unwrap();
+        let domain = Radix2EvaluationDomain::<F>::new(self.0.degree + 1).unwrap();
         assert_eq!(arthur.next_digest().unwrap(), constrain_trace_commit);
 
         let [r]: [F; 1] = arthur.challenge_scalars().unwrap();
 
         // 2. run queries
-        // TODO: number of queries dependent of target security. For the moment one query
-        let lde_domain = Radix2EvaluationDomain::<F>::new(domain.size() * self.blowup_factor)
+        // TODO: number of queries dependent of target security.
+        let lde_domain = Radix2EvaluationDomain::<F>::new(domain.size() * self.0.blowup_factor)
             .unwrap()
             .get_coset(shift)
             .unwrap();
@@ -172,7 +164,7 @@ where
             .vanishing_polynomial()
             .evaluate_over_domain(lde_domain);
         println!("Zerofier evals: {:?}", zerofier.evals);
-        let mut query_bytes = vec![0u8; 8 * self.query_num];
+        let mut query_bytes = vec![0u8; 8 * self.0.query_num];
         arthur.fill_challenge_bytes(&mut query_bytes).unwrap();
         let queries = query_bytes
             .chunks_exact_mut(8)
@@ -183,14 +175,14 @@ where
         let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
         for (i, query) in queries.into_iter().enumerate() {
             let (v_x, path) = validity_queries[i].clone();
-            assert!(validity_root.check_proof::<N, _>(&v_x, path));
+            assert!(validity_root.check_proof(&v_x, path));
 
             let mut c_x = DensePolynomial::zero();
             for (j, path) in constrain_queries[i].iter().enumerate() {
                 let constrain = constrains.get_constrain_poly(j);
                 let w_i = lde_domain.element(query);
                 let leaf = constrain.evaluate(&w_i);
-                assert!(quotient_root.check_proof::<N, _>(&leaf, path.clone()));
+                assert!(quotient_root.check_proof(&leaf, path.clone()));
 
                 c_x = c_x
                     + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
@@ -201,9 +193,58 @@ where
 
         // 3. run fri
         let fri_root = MerkleRoot::<D>(fri_commit);
-        let fri_verifier = FriVerifier::<N, D, F>::new(fri_root, self.degree, self.blowup_factor);
+        let fri_verifier =
+            FriVerifier::<D, F>::new(fri_root, self.0.degree, self.0.fri_config.clone());
         assert!(fri_verifier.verify(fri_proof, &mut arthur));
 
         true
+    }
+}
+
+pub struct StarkConfig<D, F>
+where
+    F: PrimeField,
+    D: Digest + FixedOutputReset + BlockSizeUser + Clone,
+{
+    blowup_factor: usize,
+    query_num: usize,
+    degree: usize,
+    fri_config: FriConfig<D, F>,
+    merkle_config: MerkleTreeConfig<D, F>,
+    io: IOPattern<DigestBridge<D>>,
+}
+
+impl<D, F> StarkConfig<D, F>
+where
+    F: PrimeField,
+    D: Digest + FixedOutputReset + BlockSizeUser + Clone,
+{
+    pub fn new(
+        blowup_factor: usize,
+        query_num: usize,
+        degree: usize,
+        trace_columns: usize,
+    ) -> Self {
+        Self {
+            blowup_factor,
+            query_num,
+            degree,
+            fri_config: FriConfig {
+                blowup_factor,
+                merkle_config: MerkleTreeConfig {
+                    leafs_per_node: 2,
+                    inner_children: 2,
+                    _digest: PhantomData::<D>,
+                    _field: PhantomData::<F>,
+                },
+            },
+            merkle_config: MerkleTreeConfig {
+                leafs_per_node: trace_columns,
+                inner_children: 2,
+                _digest: PhantomData::<D>,
+                _field: PhantomData::<F>,
+            },
+            io: StarkIOPattern::<D, F>::new_stark(degree, query_num, "🐺"),
+        }
     }
 }

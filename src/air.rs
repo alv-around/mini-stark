@@ -20,7 +20,7 @@ pub(crate) struct Matrix<F: PrimeField> {
 
 impl<F: PrimeField> Matrix<F> {
     pub(crate) fn new(length: usize, width: usize, entries: Option<Vec<F>>) -> Self {
-        assert!(is_power_of_two(length * width));
+        assert!(is_power_of_two(length));
         let data = match entries {
             Some(data) => {
                 assert_eq!(data.len(), length * width);
@@ -123,6 +123,10 @@ impl<F: PrimeField> TraceTable<F> {
         f: Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>,
     ) {
         self.transition_constrains.push(f);
+    }
+
+    pub fn constrain_number(&self) -> usize {
+        self.trace.width + self.transition_constrains.len()
     }
 
     pub fn derive_constrains(&self) -> Constrains<F> {
