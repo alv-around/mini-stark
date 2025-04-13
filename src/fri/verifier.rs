@@ -112,8 +112,10 @@ where
             let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
             assert_eq!(g.evaluate(&alphas[i]), y3);
 
-            commits[i].check_proof::<_>(&y1, path1);
-            commits[i].check_proof::<_>(&y2, path2);
+            assert!(path1.leaf_neighbours.contains(&y1));
+            commits[i].check_proof::<_>(path1);
+            assert!(path2.leaf_neighbours.contains(&y2));
+            commits[i].check_proof::<_>(path2);
 
             prev_x3 = x3;
         }

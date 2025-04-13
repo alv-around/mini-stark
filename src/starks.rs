@@ -20,7 +20,7 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     constrain_trace_commit: Hash<D>,
     constrain_queries: Vec<MerklePath<D, F>>,
     validity_commit: Hash<D>,
-    validity_queries: Vec<(F, MerklePath<D, F>)>,
+    validity_queries: Vec<MerklePath<D, F>>,
     fri_commit: Hash<D>,
     fri_proof: FriProof<D, F>,
 }
@@ -109,7 +109,7 @@ where
             // validity query
             let leaf = validity_trace.get_value(query, 0);
             let path = validity_codeword.generate_proof(leaf).unwrap();
-            validity_queries.push((*leaf, path));
+            validity_queries.push(path);
         }
 
         // 3. Make the low degree test FRI
@@ -170,24 +170,27 @@ where
         let validity_root = MerkleRoot::<D>(validity_commit.clone());
         let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
         for (i, query) in queries.into_iter().enumerate() {
-            let (v_x, path) = validity_queries[i].clone();
-            assert!(validity_root.check_proof(&v_x, path));
-
             let path = constrain_queries[i].clone();
             let mut c_x = DensePolynomial::zero();
+            let mut leafs = Vec::new();
+            let w_i = lde_domain.element(query);
             for (i, constrain) in constrains.get_polynomials().iter().enumerate() {
-                let w_i = lde_domain.element(query);
                 let leaf = constrain.evaluate(&w_i);
-                assert!(path.proof_contains_leaf(&leaf));
-                if i == 0 {
-                    assert!(quotient_root.check_proof(&leaf, path.clone()));
-                }
+                leafs.push(leaf);
 
                 c_x = c_x
                     + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
             }
-            let (rest, _quotient) = c_x.divide_by_vanishing_poly(domain);
+
+            assert_eq!(leafs, path.leaf_neighbours);
+            assert!(quotient_root.check_proof(path));
+            let (rest, quotient) = c_x.divide_by_vanishing_poly(domain);
             assert_eq!(rest, DensePolynomial::zero());
+
+            let path = validity_queries[i].clone();
+            let evaluation = quotient.evaluate(&w_i);
+            assert!(path.leaf_neighbours.contains(&evaluation));
+            assert!(validity_root.check_proof(path));
         }
 
         // 3. run fri
