@@ -38,14 +38,14 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D> + FriIOPattern<D, F>,
 {
-    fn new_stark(domain_size_log: usize, num_queries: usize, domsep: &str) -> Self {
+    fn new_stark(domain_size: usize, num_queries: usize, domsep: &str) -> Self {
         IOPattern::<DigestBridge<D>>::new(domsep)
             .add_digest(1, "commit to original trace")
             .challenge_scalars(1, "ZK: pick random shift of domain")
             .add_digest(1, "commit to quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
             .challenge_bytes(8 * num_queries, "retrive random queries")
-            .add_fri(domain_size_log)
+            .add_fri(domain_size)
     }
 }
 
