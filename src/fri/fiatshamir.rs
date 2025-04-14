@@ -11,8 +11,8 @@ use nimue::{
 };
 
 pub trait FriIOPattern<D: Digest, F: Field> {
-    fn new_fri(domsep: &str, round_numbers: usize) -> Self;
-    fn add_fri(self, round_numbers: usize) -> Self;
+    fn new_fri(domsep: &str, round_numbers: usize, queries: usize) -> Self;
+    fn add_fri(self, round_numbers: usize, queries: usize) -> Self;
 }
 
 impl<D, F> FriIOPattern<D, F> for IOPattern<DigestBridge<D>>
@@ -21,11 +21,11 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D>,
 {
-    fn new_fri(domsep: &str, round_numbers: usize) -> Self {
-        IOPattern::new(domsep).add_fri(round_numbers)
+    fn new_fri(domsep: &str, round_numbers: usize, queries: usize) -> Self {
+        IOPattern::new(domsep).add_fri(round_numbers, queries)
     }
 
-    fn add_fri(mut self, round_numbers: usize) -> Self {
+    fn add_fri(mut self, round_numbers: usize, queries: usize) -> Self {
         for _ in 0..round_numbers - 1 {
             self = self
                 .add_digest(1, "add merkle commit: commit to fri round")
@@ -34,7 +34,10 @@ where
 
         self = self
             .add_digest(1, "add merkle commit: commit to last fri round")
-            .challenge_bytes(8, "query phase: choose a random element in the domain");
+            .challenge_bytes(
+                8 * queries,
+                "query phase: choose a random element in the domain",
+            );
 
         self
     }

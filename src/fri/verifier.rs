@@ -14,13 +14,14 @@ use nimue::{Arthur, ByteChallenges, DigestBridge, IOPatternError};
 use std::iter::zip;
 use std::marker::PhantomData;
 
-pub struct Transcript<D: Digest, F: PrimeField>(Vec<MerkleRoot<D>>, Vec<F>, usize);
+pub struct Transcript<D: Digest, F: PrimeField>(Vec<MerkleRoot<D>>, Vec<F>, Vec<usize>);
 
 pub struct FriVerifier<D, F>
 where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
+    queries: usize,
     domain_size: usize,
     rounds: usize,
     commit: MerkleRoot<D>,
@@ -34,6 +35,7 @@ where
 {
     pub fn new(commit: MerkleRoot<D>, degree: usize, config: FriConfig<D, F>) -> Self {
         let FriConfig {
+            queries,
             merkle_config,
             blowup_factor,
         } = config;
@@ -42,6 +44,7 @@ where
         let rounds = logarithm_of_two_k(domain_size, merkle_config.inner_children).unwrap();
 
         Self {
+            queries,
             rounds,
             domain_size,
             commit,
@@ -68,13 +71,21 @@ where
         let digest = arthur.next_digest().unwrap();
         commits.push(MerkleRoot(digest));
 
-        let beta = arthur.challenge_bytes().unwrap();
-        let mut beta = usize::from_le_bytes(beta);
-        if beta > self.domain_size {
-            beta %= self.domain_size;
-        }
+        let mut betas = vec![0u8; 8 * self.queries];
+        arthur.fill_challenge_bytes(&mut betas).unwrap();
+        let betas = betas
+            .chunks_exact(8)
+            .map(|a| usize::from_le_bytes(a.try_into().unwrap()))
+            .map(|a| {
+                if a > self.domain_size {
+                    a % self.domain_size
+                } else {
+                    a
+                }
+            })
+            .collect();
 
-        Ok(Transcript(commits, alphas, beta))
+        Ok(Transcript(commits, alphas, betas))
     }
 
     pub fn verify(
@@ -82,7 +93,7 @@ where
         proof: FriProof<D, F>,
         arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
     ) -> bool {
-        let Transcript(commits, alphas, beta) = self.read_proof_transcript(arthur).unwrap();
+        let Transcript(commits, alphas, betas) = self.read_proof_transcript(arthur).unwrap();
         assert_eq!(1 << commits.len(), self.domain_size);
         assert_eq!(self.commit.0, commits[0].0);
         if commits.len() != self.rounds || commits.len() - 1 != proof.points.len() {
@@ -90,34 +101,40 @@ where
         }
 
         let domain = Radix2EvaluationDomain::<F>::new(self.domain_size).unwrap();
-        let mut prev_x3 = domain.element(beta);
-        for (i, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2])) in
-            zip(proof.points, proof.queries).enumerate()
-        {
+        let prev_x3s = betas.iter().map(|a| domain.element(*a)).collect::<Vec<F>>();
+        for (i, (round_points, round_queries)) in zip(proof.points, proof.queries).enumerate() {
             println!("Verification Round {}", i + 1);
-            assert_eq!(x1, prev_x3);
-            assert_eq!(-x1, x2);
-            assert_eq!(x1.pow([2]), x3);
 
-            let quotient = DensePolynomial::from_coefficients_vec(proof.quotients[i].clone());
-            let vanishing_poly = self.calculate_vanishing_poly(&[x1, x2, x3]);
-            let total_degree = quotient.degree() + vanishing_poly.degree();
-            assert!(total_degree >= 2);
-            assert!(total_degree <= 1 << (self.rounds - i));
-            let _ = quotient / vanishing_poly;
+            for (j, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2])) in
+                zip(round_points, round_queries).enumerate()
+            {
+                if j == 0 {
+                    assert_eq!(x1, prev_x3s[j]);
+                }
+                // assert_eq!(x1, prev_x3);
+                assert_eq!(-x1, x2);
+                assert_eq!(x1.pow([2]), x3);
 
-            // linearity test
-            let a = (y2 - y1) / (x2 - x1);
-            let b = y1 - a * x1;
-            let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
-            assert_eq!(g.evaluate(&alphas[i]), y3);
+                let quotient =
+                    DensePolynomial::from_coefficients_vec(proof.quotients[j][i].clone());
+                let vanishing_poly = self.calculate_vanishing_poly(&[x1, x2, x3]);
+                let total_degree = quotient.degree() + vanishing_poly.degree();
+                assert!(total_degree >= 2);
+                assert!(total_degree <= 1 << (self.rounds - i));
+                let _ = quotient / vanishing_poly;
 
-            assert!(path1.leaf_neighbours.contains(&y1));
-            commits[i].check_proof::<_>(path1);
-            assert!(path2.leaf_neighbours.contains(&y2));
-            commits[i].check_proof::<_>(path2);
+                // linearity test
+                let a = (y2 - y1) / (x2 - x1);
+                let b = y1 - a * x1;
+                let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
+                assert_eq!(g.evaluate(&alphas[i]), y3);
 
-            prev_x3 = x3;
+                assert!(path1.leaf_neighbours.contains(&y1));
+                commits[i].check_proof::<_>(path1);
+                assert!(path2.leaf_neighbours.contains(&y2));
+                commits[i].check_proof::<_>(path2);
+                // prev_x3 = x3;
+            }
         }
 
         true
@@ -164,6 +181,7 @@ mod test {
         };
 
         let config = FriConfig {
+            queries: 1,
             merkle_config,
             blowup_factor: 2,
         };

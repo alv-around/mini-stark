@@ -29,7 +29,12 @@ where
 }
 
 pub trait StarkIOPattern<D: Digest, F: Field> {
-    fn new_stark(domain_size_log: usize, num_queries: usize, domsep: &str) -> Self;
+    fn new_stark(
+        domain_size_log: usize,
+        constrain_queries: usize,
+        fri_queries: usize,
+        domsep: &str,
+    ) -> Self;
 }
 
 impl<D, F> StarkIOPattern<D, F> for IOPattern<DigestBridge<D>>
@@ -38,14 +43,19 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D> + FriIOPattern<D, F>,
 {
-    fn new_stark(domain_size: usize, num_queries: usize, domsep: &str) -> Self {
+    fn new_stark(
+        domain_size: usize,
+        constrain_queries: usize,
+        fri_queries: usize,
+        domsep: &str,
+    ) -> Self {
         IOPattern::<DigestBridge<D>>::new(domsep)
             .add_digest(1, "commit to original trace")
             .challenge_scalars(1, "ZK: pick random shift of domain")
             .add_digest(1, "commit to quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
-            .challenge_bytes(8 * num_queries, "retrive random queries")
-            .add_fri(domain_size)
+            .challenge_bytes(8 * constrain_queries, "retrive random queries")
+            .add_fri(domain_size, fri_queries)
     }
 }
 

@@ -20,6 +20,7 @@ where
     round_num: usize,
     transcript: &'a mut Merlin<DigestBridge<D>>,
     rounds: Vec<FriRound<D, F>>,
+    queries: usize,
 }
 
 impl<'a, D, F> FriProver<'a, D, F>
@@ -33,6 +34,7 @@ where
         config: FriConfig<D, F>,
     ) -> Self {
         let FriConfig {
+            queries,
             merkle_config,
             blowup_factor,
         } = config;
@@ -58,6 +60,7 @@ where
         rounds.push(first_round);
 
         Self {
+            queries,
             round_num,
             rounds,
             transcript,
@@ -105,13 +108,11 @@ where
     }
 
     pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), &str> {
-        let mut beta = [0u8; 8]; // usize is 64-bits
-        self.transcript.fill_challenge_bytes(&mut beta).unwrap();
-        let mut beta = usize::from_le_bytes(beta);
-        let domain_size = self.rounds[0].domain.size();
-        if beta > domain_size {
-            beta %= domain_size;
-        }
+        let mut betas = vec![0u8; 8 * self.queries]; // usize is 64-bits
+        self.transcript.fill_challenge_bytes(&mut betas).unwrap();
+        let mut betas = betas
+            .chunks_exact(8)
+            .map(|a| usize::from_le_bytes(a.try_into().unwrap()));
 
         let mut queries = Vec::new();
         let mut points = Vec::new();
@@ -129,37 +130,49 @@ where
                 round.domain.size()
             );
 
-            let x1 = previous_domain.element(beta);
-            let x2 = previous_domain.element(round.domain.size() + beta);
-            let x3 = round.domain.element(beta);
-            let y1 = previous_poly.evaluate(&x1);
-            let y2 = previous_poly.evaluate(&x2);
-            let y3 = round.poly.evaluate(&x3);
-            points.push([(x1, y1), (x2, y2), (x3, y3)]);
-            assert_eq!(x3, previous_domain.element(2 * beta));
+            let mut round_queries = Vec::new();
+            let mut round_points = Vec::new();
+            let mut round_quotients = Vec::new();
+            for query in &mut betas {
+                let mut beta = query;
+                if beta > previous_domain.size() {
+                    beta %= previous_domain.size();
+                }
 
-            // quotienting
-            // g(x) = ax + b
-            let a = (y2 - y1) / (x2 - x1);
-            let b = y1 - a * x1;
-            let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
+                let x1 = previous_domain.element(beta);
+                let x2 = previous_domain.element(round.domain.size() + beta);
+                let x3 = round.domain.element(beta);
+                let y1 = previous_poly.evaluate(&x1);
+                let y2 = previous_poly.evaluate(&x2);
+                let y3 = round.poly.evaluate(&x3);
+                round_points.push([(x1, y1), (x2, y2), (x3, y3)]);
+                assert_eq!(x3, previous_domain.element(2 * beta));
 
-            // q(x) = f(x) - g(x) / Z(x)
-            let numerator = previous_poly.clone() - g;
-            let vanishing_poly = FriProver::<D, F>::calculate_vanishing_poly(&[x1, x2]);
-            let q = numerator / vanishing_poly;
-            println!("quotient: {:?}", q);
-            quotients.push(q.to_vec());
+                // quotienting
+                // g(x) = ax + b
+                let a = (y2 - y1) / (x2 - x1);
+                let b = y1 - a * x1;
+                let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
 
-            // merkle commits
-            let proof1 = previous_commit.generate_proof(&y1).unwrap();
-            let proof2 = previous_commit.generate_proof(&y2).unwrap();
-            queries.push([proof1, proof2]);
+                // q(x) = f(x) - g(x) / Z(x)
+                let numerator = previous_poly.clone() - g;
+                let vanishing_poly = FriProver::<D, F>::calculate_vanishing_poly(&[x1, x2]);
+                let q = numerator / vanishing_poly;
+                println!("quotient: {:?}", q);
+                round_quotients.push(q.to_vec());
 
+                // merkle commits
+                let proof1 = previous_commit.generate_proof(&y1).unwrap();
+                let proof2 = previous_commit.generate_proof(&y2).unwrap();
+                round_queries.push([proof1, proof2]);
+            }
+
+            points.push(round_points);
+            queries.push(round_queries);
+            quotients.push(round_quotients);
             previous_poly = &round.poly;
             previous_commit = &round.commit;
             previous_domain = &round.domain;
-            beta %= round.domain.size();
             println!("another round achieved");
         }
 
@@ -270,7 +283,9 @@ mod test {
     fn test_fri_prover_new() {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let io: IOPattern<DigestBridge<Sha256>> = FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let queries = 1;
+        let io: IOPattern<DigestBridge<Sha256>> =
+            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3, queries);
         let mut transcript = io.to_merlin();
 
         let merkle_config = MerkleTreeConfig {
@@ -281,6 +296,7 @@ mod test {
         };
 
         let config = FriConfig {
+            queries,
             merkle_config,
             blowup_factor: 2,
         };

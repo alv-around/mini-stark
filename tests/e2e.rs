@@ -101,11 +101,10 @@ fn test_stark_prover() {
     let constrains = trace.derive_constrains();
 
     let blowup_factor = 2;
-    let query_num = 80;
     let degree = trace.step_number() - 1;
     let columns = trace.constrain_number();
 
-    let config = StarkConfig::<Sha256, Goldilocks>::new(blowup_factor, query_num, degree, columns);
+    let config = StarkConfig::<Sha256, Goldilocks>::new(100, blowup_factor, degree, columns);
     let proof_system = Stark::new(config);
     let proof = proof_system.prove(claim, witness).unwrap();
 

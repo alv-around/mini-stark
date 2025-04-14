@@ -8,16 +8,16 @@ use digest::Digest;
 
 #[derive(Clone)]
 pub struct FriConfig<D: Digest, F: PrimeField> {
+    pub(crate) queries: usize,
     pub(crate) merkle_config: MerkleTreeConfig<D, F>,
     pub(crate) blowup_factor: usize,
 }
 
 #[derive(Clone)]
 pub struct FriProof<D: Digest, F: PrimeField> {
-    // transcript: Vec<u8>,
-    points: Vec<[(F, F); 3]>,
-    queries: Vec<[MerklePath<D, F>; 2]>,
-    quotients: Vec<Vec<F>>,
+    points: Vec<Vec<[(F, F); 3]>>,
+    queries: Vec<Vec<[MerklePath<D, F>; 2]>>,
+    quotients: Vec<Vec<Vec<F>>>,
 }
 
 #[cfg(test)]
@@ -40,7 +40,9 @@ mod test {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let degree = poly.degree();
-        let io: IOPattern<DigestBridge<Sha256>> = FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3);
+        let queries = 1;
+        let io: IOPattern<DigestBridge<Sha256>> =
+            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3, 1);
         let mut transcript = io.to_merlin();
 
         let merkle_config = MerkleTreeConfig {
@@ -51,6 +53,7 @@ mod test {
         };
 
         let config = FriConfig {
+            queries,
             merkle_config,
             blowup_factor: 2,
         };

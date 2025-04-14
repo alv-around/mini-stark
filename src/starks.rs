@@ -53,8 +53,7 @@ where
         let trace_commit = trace_codeword.root();
         merlin.add_bytes(&trace_commit).unwrap();
 
-        // TODO: add the coset trick to add zk
-        let lde_domain_size = self.0.blowup_factor * trace.trace.len();
+        let lde_domain_size = self.0.blowup_factor * trace_domain.size();
         let [random_shift]: [F; 1] = merlin.challenge_scalars().unwrap();
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size)
             .unwrap()
@@ -92,7 +91,7 @@ where
         let validity_commit = validity_codeword.root();
 
         // 2. Queries
-        let mut query_bytes = vec![0u8; 8 * self.0.query_num];
+        let mut query_bytes = vec![0u8; 8 * self.0.constrain_queries];
         merlin.fill_challenge_bytes(&mut query_bytes).unwrap();
         let queries = query_bytes
             .chunks_exact_mut(8)
@@ -161,7 +160,7 @@ where
             .vanishing_polynomial()
             .evaluate_over_domain(lde_domain);
         println!("Zerofier evals: {:?}", zerofier.evals);
-        let mut query_bytes = vec![0u8; 8 * self.0.query_num];
+        let mut query_bytes = vec![0u8; 8 * self.0.constrain_queries];
         arthur.fill_challenge_bytes(&mut query_bytes).unwrap();
         let queries = query_bytes
             .chunks_exact_mut(8)
@@ -209,8 +208,10 @@ where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
+    #[allow(dead_code)]
+    security_bits: usize,
     blowup_factor: usize,
-    query_num: usize,
+    constrain_queries: usize,
     degree: usize,
     fri_config: FriConfig<D, F>,
     merkle_config: MerkleTreeConfig<D, F>,
@@ -223,16 +224,20 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
     pub fn new(
+        security_bits: usize,
         blowup_factor: usize,
-        query_num: usize,
         degree: usize,
         trace_columns: usize,
     ) -> Self {
+        let (constrain_queries, fri_queries) =
+            Self::num_queries_from_config(security_bits, blowup_factor);
         Self {
+            security_bits,
             blowup_factor,
-            query_num,
+            constrain_queries,
             degree,
             fri_config: FriConfig {
+                queries: fri_queries,
                 blowup_factor,
                 merkle_config: MerkleTreeConfig {
                     leafs_per_node: 2,
@@ -247,7 +252,14 @@ where
                 _digest: PhantomData::<D>,
                 _field: PhantomData::<F>,
             },
-            io: StarkIOPattern::<D, F>::new_stark(degree, query_num, "🐺"),
+            io: StarkIOPattern::<D, F>::new_stark(degree, constrain_queries, fri_queries, "🐺"),
         }
+    }
+
+    fn num_queries_from_config(security_bits: usize, blowup_factor: usize) -> (usize, usize) {
+        let num_constrain_queries = 80;
+        let num_fri_queries = 1;
+
+        (num_constrain_queries, num_fri_queries)
     }
 }
