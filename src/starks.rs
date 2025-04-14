@@ -12,6 +12,7 @@ use digest::{Digest, FixedOutputReset};
 use nimue::plugins::ark::FieldChallenges;
 use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, IOPattern};
 use std::error::Error;
+use std::iter::zip;
 use std::marker::PhantomData;
 
 pub struct StarkProof<D: Digest, F: PrimeField> {
@@ -169,8 +170,9 @@ where
 
         let validity_root = MerkleRoot::<D>(validity_commit.clone());
         let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
-        for (i, query) in queries.into_iter().enumerate() {
-            let path = constrain_queries[i].clone();
+        for (query, (constrain_query, validity_query)) in
+            zip(queries, zip(constrain_queries, validity_queries))
+        {
             let mut c_x = DensePolynomial::zero();
             let mut leafs = Vec::new();
             let w_i = lde_domain.element(query);
@@ -182,15 +184,14 @@ where
                     + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
             }
 
-            assert_eq!(leafs, path.leaf_neighbours);
-            assert!(quotient_root.check_proof(path));
+            assert_eq!(leafs, constrain_query.leaf_neighbours);
+            assert!(quotient_root.check_proof(constrain_query));
             let (rest, quotient) = c_x.divide_by_vanishing_poly(domain);
             assert_eq!(rest, DensePolynomial::zero());
 
-            let path = validity_queries[i].clone();
             let evaluation = quotient.evaluate(&w_i);
-            assert!(path.leaf_neighbours.contains(&evaluation));
-            assert!(validity_root.check_proof(path));
+            assert!(validity_query.leaf_neighbours.contains(&evaluation));
+            assert!(validity_root.check_proof(validity_query));
         }
 
         // 3. run fri
