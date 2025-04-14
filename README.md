@@ -11,7 +11,7 @@ currently system status:
 - Soundness :x:
 - Non-interactive ✅
 - Succint ✅
-- Zero-Knowledge ✅
+- Zero-Knowledge^* ❓
 
 Issues/comments/critics all very welcome.
 
@@ -34,13 +34,22 @@ Planned features(in no specific order):
   - [ ] WHIR ??
   - [ ] ..
 
+## Comments
+
+### Zero-Knowledge
+
+  The zk property was implemented following [stark-by-hand](https://dev.risczero.com/proof-system/stark-by-hand).
+  It was shown in the [following paper](https://eprint.iacr.org/2024/1037.pdf#cite.FRISummary) do not meet the requirements to assert the specific property of zero knowledge.
+But this is still a topic of discussion.
+
 ## Reference
 
 Here is a list of some resources, I used:
 
 - The IOPP has been mostly taken from [stark-by-hand by risc0](https://dev.risczero.com/proof-system/stark-by-hand) and to a lesser degree from [anatomy of a STARK](https://aszepieniec.github.io/stark-anatomy/stark).
-- FRI is based [anatomy of a STARK](https://aszepieniec.github.io/stark-anatomy/stark) and [Chp.8 of zk-learning.org](https://rdi.berkeley.edu/zk-learning/assets/lecture8.pdf) on that order.
+- FRI is based [anatomy of a STARK](https://aszepieniec.github.io/stark-anatomy/stark) and [Chp.8 of zk-learning.org](https://rdi.berkeley.edu/zk-learning/assets/lecture8.pdf) and the following [FRI Summary](https://eprint.iacr.org/2022/1216.pdf) in no specific order.
 - For the AIR arithmetization, I took great inspiration from [OpenZK](https://www.youtube.com/watch?v=H3AKu03AwYc). [Notes on air arithmetization](https://cronokirby.com/posts/2022/09/notes-on-stark-arithmetization/) is a very good primer on air.
+- For the zk-property this implementation follows [stark-by-hand](https://dev.risczero.com/proof-system/stark-by-hand#lesson-5-zk-commitments-of-the-trace-data) and I am aware of it limitations discussed [here](https://eprint.iacr.org/2024/1037.pdf#cite.FRISummary).
 - I took FRI-batching from risc0 knowledge database
 ...
 

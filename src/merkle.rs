@@ -197,24 +197,14 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
 
 #[derive(Clone, Debug)]
 pub struct MerklePath<D: Digest, F: PrimeField> {
-    leaf_neighbours: Vec<F>,
+    pub(super) leaf_neighbours: Vec<F>,
     path: Vec<Vec<Hash<D>>>,
-}
-
-impl<D: Digest, F: PrimeField> MerklePath<D, F> {
-    pub fn proof_contains_leaf(&self, leaf: &F) -> bool {
-        self.leaf_neighbours.contains(leaf)
-    }
 }
 
 pub struct MerkleRoot<D: Digest>(pub Hash<D>);
 
 impl<D: Digest> MerkleRoot<D> {
-    pub fn check_proof<F: PrimeField>(&self, leaf: &F, proof: MerklePath<D, F>) -> bool {
-        if !proof.leaf_neighbours.contains(leaf) {
-            return false;
-        };
-
+    pub fn check_proof<F: PrimeField>(&self, proof: MerklePath<D, F>) -> bool {
         let mut previous = MerkleTree::<D, F>::calculate_from_leafs(&proof.leaf_neighbours);
 
         for (i, level) in proof.path.iter().enumerate() {
@@ -366,17 +356,18 @@ mod test {
 
         let f_one = Goldilocks::from(7);
         let proof = tree.generate_proof(&f_one).unwrap();
+        assert!(proof.leaf_neighbours.contains(&f_one));
         assert_eq!(proof.path.len(), 3);
         println!("Proof: {:?}", proof);
-        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(&f_one, proof));
+        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(proof));
 
         let tree = make_tree(TWO_FOUR);
         let root = tree.root();
 
-        let f_one = Goldilocks::from(7);
         let proof = tree.generate_proof(&f_one).unwrap();
+        assert!(proof.leaf_neighbours.contains(&f_one));
         assert_eq!(proof.path.len(), 2);
         println!("Proof: {:?}", proof);
-        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(&f_one, proof));
+        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(proof));
     }
 }

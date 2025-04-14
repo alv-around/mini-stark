@@ -67,7 +67,7 @@ fn test_setup() -> (Witness, FibonacciClaim) {
         secret_b: Goldilocks::from(2),
     };
     let claim = FibonacciClaim {
-        step: 5,
+        step: 20,
         output: Goldilocks::from(13),
     };
     (witness, claim)
