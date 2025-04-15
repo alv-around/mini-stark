@@ -1,6 +1,10 @@
 use crate::air::{Constrains, Matrix, Provable};
-use crate::fiatshamir::StarkIOPattern;
-use crate::fri::{fiatshamir::DigestReader, prover::FriProver, verifier::FriVerifier};
+use crate::fiatshamir::{DigestIOWritter, StarkIOPattern};
+use crate::fri::{
+    fiatshamir::{DigestReader, FriIOPattern},
+    prover::FriProver,
+    verifier::FriVerifier,
+};
 use crate::fri::{FriConfig, FriProof};
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
 use crate::util::ceil_log2_k;
@@ -11,7 +15,7 @@ use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2Evaluation
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
 use log::{debug, error, info};
-use nimue::plugins::ark::FieldChallenges;
+use nimue::plugins::ark::{FieldChallenges, FieldIOPattern};
 use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, IOPattern};
 use std::error::Error;
 use std::iter::zip;
@@ -209,6 +213,8 @@ pub struct StarkConfig<D, F>
 where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
+    IOPattern<DigestBridge<D>>:
+        StarkIOPattern<D, F> + FriIOPattern<D, F> + FieldIOPattern<F> + DigestIOWritter<D>,
 {
     #[allow(dead_code)]
     security_bits: usize,
@@ -224,15 +230,19 @@ impl<D, F> StarkConfig<D, F>
 where
     F: PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
+    IOPattern<DigestBridge<D>>:
+        StarkIOPattern<D, F> + FriIOPattern<D, F> + FieldIOPattern<F> + DigestIOWritter<D>,
 {
     pub fn new(
         security_bits: usize,
         blowup_factor: usize,
-        degree: usize,
+        steps: usize,
         trace_columns: usize,
     ) -> Self {
         let (constrain_queries, fri_queries) =
-            Self::num_queries_from_config(security_bits, blowup_factor, degree);
+            Self::num_queries_from_config(security_bits, blowup_factor, steps);
+        let degree = steps - 1;
+        let rounds = ceil_log2_k((steps * blowup_factor) + 1, 2);
 
         info!(
             "--------- \n 
@@ -260,14 +270,19 @@ where
                 _digest: PhantomData::<D>,
                 _field: PhantomData::<F>,
             },
-            io: StarkIOPattern::<D, F>::new_stark(degree, constrain_queries, fri_queries, "🐺"),
+            io: <IOPattern<DigestBridge<D>> as StarkIOPattern<D, F>>::new_stark(
+                rounds,
+                constrain_queries,
+                fri_queries,
+                "🐺",
+            ),
         }
     }
 
     fn num_queries_from_config(
         security_bits: usize,
         blowup_factor: usize,
-        degree: usize,
+        steps: usize,
     ) -> (usize, usize) {
         if security_bits < 20 {
             error!("STARK Config: security bits has to be at least 20");
@@ -275,7 +290,7 @@ where
         }
         let num_constrain_queries = security_bits.div_ceil(ceil_log2_k(blowup_factor, 2));
 
-        let rounds = ceil_log2_k((degree + 1) * blowup_factor, 2);
+        let rounds = ceil_log2_k(steps * blowup_factor, 2);
         let rho = 1f64 / blowup_factor as f64;
         let denominator = (2f64 / (1f64 + rho)).log2();
         let total_fri_queries = (security_bits as f64) / denominator;
@@ -295,32 +310,32 @@ mod test {
     #[should_panic]
     fn test_stark_config_with_low_security_bits() {
         // test query_number is at least 1
-        StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(1, 4, 129);
+        StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(1, 4, 128);
     }
 
     #[test]
     fn test_stark_config_query_numbers() {
         let blowup_factor = 4;
-        let degree = 128;
+        let steps = 129;
 
         // test query_number is at least 1
         let (constrain_queries, fri_queries) =
-            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(20, blowup_factor, degree);
+            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(20, blowup_factor, steps);
         assert_eq!(constrain_queries, 10);
         assert_eq!(fri_queries, 3);
 
         let (constrain_queries, fri_queries) =
-            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(20, 2, 8);
+            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(20, 2, 9);
         assert_eq!(constrain_queries, 20);
         assert_eq!(fri_queries, 10);
 
         // test that queries grow linearly with security bits
         let (constrain_queries, fri_queries) =
-            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(128, blowup_factor, degree);
+            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(128, blowup_factor, steps);
         assert_eq!(constrain_queries, 64);
         assert_eq!(fri_queries, 19);
         let (constrain_queries, fri_queries) =
-            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(256, blowup_factor, 512);
+            StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(256, blowup_factor, 513);
         assert_eq!(constrain_queries, 128);
         assert_eq!(fri_queries, 32);
     }

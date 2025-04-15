@@ -25,14 +25,15 @@ where
         IOPattern::new(domsep).add_fri(round_numbers, queries)
     }
 
-    fn add_fri(mut self, round_numbers: usize, queries: usize) -> Self {
+    fn add_fri(self, round_numbers: usize, queries: usize) -> Self {
+        let mut this = self;
         for _ in 0..round_numbers - 1 {
-            self = self
+            this = this
                 .add_digest(1, "add merkle commit: commit to fri round")
                 .challenge_scalars(1, "random scalar challenge: polynomial folding");
         }
 
-        self = self
+        this = this
             .add_digest(1, "add merkle commit: commit to last fri round")
             .challenge_bytes(
                 8 * queries,
@@ -41,7 +42,7 @@ where
 
         println!("CONFIG: {} queries added", queries);
 
-        self
+        this
     }
 }
 

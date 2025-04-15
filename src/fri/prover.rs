@@ -108,7 +108,7 @@ where
     }
 
     pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), &str> {
-        let mut betas = vec![0u8; 8]; // * self.queries]; // usize is 64-bits
+        let mut betas = vec![0u8; 8 * self.queries]; // usize is 64-bits
         self.transcript.fill_challenge_bytes(&mut betas).unwrap();
         let betas = betas
             .chunks_exact(8)

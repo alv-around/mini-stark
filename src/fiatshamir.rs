@@ -41,7 +41,7 @@ impl<D, F> StarkIOPattern<D, F> for IOPattern<DigestBridge<D>>
 where
     F: Field,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D> + FriIOPattern<D, F>,
+    Self: FieldIOPattern<F> + DigestIOWritter<D> + FriIOPattern<D, F>,
 {
     fn new_stark(
         domain_size: usize,
@@ -49,7 +49,7 @@ where
         fri_queries: usize,
         domsep: &str,
     ) -> Self {
-        IOPattern::<DigestBridge<D>>::new(domsep)
+        IOPattern::new(domsep)
             .add_digest(1, "commit to original trace")
             .challenge_scalars(1, "ZK: pick random shift of domain")
             .add_digest(1, "commit to quotients")
@@ -74,4 +74,20 @@ impl<H: DuplexHash> UsizeReader for Arthur<'_, H, u8> {
             .collect();
         Ok(challenges)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn assert_impls_stark_pattern<D, F>()
+    where
+        IOPattern<DigestBridge<D>>: StarkIOPattern<D, F>,
+        D: Digest + FixedOutputReset + BlockSizeUser + Clone,
+        F: Field,
+    {
+    }
+
+    #[test]
+    fn test_new_stark_iopattern() {}
 }
