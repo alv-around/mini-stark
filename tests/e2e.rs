@@ -98,13 +98,13 @@ fn test_fibonacci_air_constrains() {
 fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
-    let degree = trace.step_number() - 1;
     let constrains = trace.derive_constrains();
 
     let blowup_factor = 2;
     let columns = trace.constrain_number();
 
-    let config = StarkConfig::<Sha256, Goldilocks>::new(20, blowup_factor, degree, columns);
+    let config =
+        StarkConfig::<Sha256, Goldilocks>::new(20, blowup_factor, trace.step_number(), columns);
     let proof_system = Stark::new(config);
     let proof = proof_system.prove(claim, witness).unwrap();
 

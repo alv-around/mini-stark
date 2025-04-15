@@ -157,7 +157,6 @@ where
         let [r]: [F; 1] = arthur.challenge_scalars().unwrap();
 
         // 2. run queries
-        // TODO: number of queries dependent of target security.
         let lde_domain = Radix2EvaluationDomain::<F>::new(domain.size() * self.0.blowup_factor)
             .unwrap()
             .get_coset(shift)
@@ -175,9 +174,11 @@ where
 
         let validity_root = MerkleRoot::<D>(validity_commit.clone());
         let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
+        let query_num = 0;
         for (query, (constrain_query, validity_query)) in
             zip(queries, zip(constrain_queries, validity_queries))
         {
+            println!("query num: {}", query_num);
             let mut c_x = DensePolynomial::zero();
             let mut leafs = Vec::new();
             let w_i = lde_domain.element(query);
