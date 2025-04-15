@@ -42,7 +42,7 @@ mod test {
         let degree = poly.degree();
         let queries = 1;
         let io: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3, 1);
+            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3, 2);
         let mut transcript = io.to_merlin();
 
         let merkle_config = MerkleTreeConfig {

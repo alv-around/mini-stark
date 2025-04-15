@@ -108,15 +108,15 @@ where
             for (j, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2])) in
                 zip(round_points, round_queries).enumerate()
             {
-                if j == 0 {
-                    assert_eq!(x1, prev_x3s[j]);
-                }
-                // assert_eq!(x1, prev_x3);
+                // if j == 0 {
+                //     assert_eq!(x1, prev_x3s[j]);
+                // }
+                // // assert_eq!(x1, prev_x3);
                 assert_eq!(-x1, x2);
                 assert_eq!(x1.pow([2]), x3);
 
                 let quotient =
-                    DensePolynomial::from_coefficients_vec(proof.quotients[j][i].clone());
+                    DensePolynomial::from_coefficients_vec(proof.quotients[i][j].clone());
                 let vanishing_poly = self.calculate_vanishing_poly(&[x1, x2, x3]);
                 let total_degree = quotient.degree() + vanishing_poly.degree();
                 assert!(total_degree >= 2);

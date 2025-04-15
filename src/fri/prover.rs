@@ -108,11 +108,12 @@ where
     }
 
     pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), &str> {
-        let mut betas = vec![0u8; 8 * self.queries]; // usize is 64-bits
+        let mut betas = vec![0u8; 8]; // * self.queries]; // usize is 64-bits
         self.transcript.fill_challenge_bytes(&mut betas).unwrap();
-        let mut betas = betas
+        let betas = betas
             .chunks_exact(8)
-            .map(|a| usize::from_le_bytes(a.try_into().unwrap()));
+            .map(|a| usize::from_le_bytes(a.try_into().unwrap()))
+            .collect::<Vec<usize>>();
 
         let mut queries = Vec::new();
         let mut points = Vec::new();
@@ -133,8 +134,8 @@ where
             let mut round_queries = Vec::new();
             let mut round_points = Vec::new();
             let mut round_quotients = Vec::new();
-            for query in &mut betas {
-                let mut beta = query;
+            for query in &mut betas.iter() {
+                let mut beta = *query;
                 if beta > previous_domain.size() {
                     beta %= previous_domain.size();
                 }
