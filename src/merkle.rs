@@ -51,9 +51,10 @@ impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
             Err(error_str) => panic!("{}", error_str),
         };
 
+        assert_eq!(leaf_num % leafs_per_node, 0);
         assert_eq!(
-            inner_children.pow((levels - 1) as u32) * leafs_per_node,
-            leaf_num,
+            inner_children.pow((levels - 1) as u32),
+            leaf_num / leafs_per_node,
             "Tree is not full! input length must be a power of {inner_children}"
         );
 

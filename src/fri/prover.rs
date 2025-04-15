@@ -283,7 +283,7 @@ mod test {
     fn test_fri_prover_new() {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
-        let queries = 1;
+        let queries = 3;
         let io: IOPattern<DigestBridge<Sha256>> =
             FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3, queries);
         let mut transcript = io.to_merlin();
