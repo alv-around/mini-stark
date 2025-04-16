@@ -44,10 +44,6 @@ impl<F: PrimeField> Matrix<F> {
         &self.data[row * self.width + col]
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.length
-    }
-
     #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.length == 0 || self.width == 0
@@ -249,7 +245,7 @@ mod test {
             output: Goldilocks::from(3),
         };
         let trace = third_fibonacci.trace(&Witness);
-        assert_eq!(trace.trace.len(), 4);
+        assert_eq!(trace.trace.length, 4);
         assert_eq!(trace.trace.width, 2);
         assert_eq!(*trace.trace.get_value(0, 0), ONE);
         assert_eq!(

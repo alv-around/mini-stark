@@ -68,6 +68,7 @@ fn test_setup() -> (Witness, FibonacciClaim) {
     };
     let claim = FibonacciClaim {
         step: 9,
+        // FIXME: output should be used in the proof
         output: Goldilocks::from(13),
     };
     (witness, claim)
