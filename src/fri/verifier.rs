@@ -9,6 +9,7 @@ use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial};
 use ark_std::test_rng;
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
+use log::{debug, info};
 use nimue::plugins::ark::FieldChallenges;
 use nimue::{Arthur, ByteChallenges, DigestBridge, IOPatternError};
 use std::iter::zip;
@@ -44,6 +45,13 @@ where
             1 << ceil_log2_k((degree + 1) * blowup_factor, merkle_config.inner_children);
         let rounds = logarithm_of_two_k(domain_size, merkle_config.inner_children).unwrap();
 
+        info!(
+            "*******\n
+            FRI Verifier initialized with following config:
+            commit: {:?} | degree: {} | domain size: {} | rounds: {}\n 
+            *******\n",
+            commit.0, degree, domain_size, rounds
+        );
         Self {
             queries,
             rounds,
@@ -57,14 +65,14 @@ where
         &self,
         arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
     ) -> Result<Transcript<D, F>, IOPatternError> {
+        debug!("FRI Verifier: reading proof transcript");
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
 
-        for i in 1..self.rounds {
+        for _ in 1..self.rounds {
             let digest = arthur.next_digest().unwrap();
             commits.push(MerkleRoot(digest));
 
-            println!("round: {}", i);
             let alpha: [F; 1] = arthur.challenge_scalars().unwrap();
             alphas.push(alpha[0]);
         }
@@ -104,7 +112,7 @@ where
         let domain = Radix2EvaluationDomain::<F>::new(self.domain_size).unwrap();
         let mut prev_x3s = betas.iter().map(|a| domain.element(*a)).collect::<Vec<F>>();
         for (i, (round_points, round_queries)) in zip(proof.points, proof.queries).enumerate() {
-            println!("Verification Round {}", i + 1);
+            debug!("FRI Verifier: verification Round {}", i + 1);
 
             for (j, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2])) in
                 zip(round_points, round_queries).enumerate()

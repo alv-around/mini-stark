@@ -1,5 +1,5 @@
 use super::{FriConfig, FriProof};
-use crate::merkle::{MerklePath, MerkleTree, MerkleTreeConfig, Tree};
+use crate::merkle::{MerkleTree, MerkleTreeConfig, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -8,6 +8,7 @@ use ark_poly::EvaluationDomain;
 use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
+use log::{debug, info, trace};
 use nimue::plugins::ark::FieldChallenges;
 use nimue::DigestBridge;
 use nimue::{ByteChallenges, ByteWriter, Merlin};
@@ -43,8 +44,16 @@ where
         let domain_size = domain.size as usize;
         let round_num = domain.log_size_of_group as usize;
 
+        info!(
+            "*******\n
+            FRI Prover initialized with following config:
+            domain size: {} | rounds: {}\n 
+            *******\n",
+            domain_size, round_num
+        );
+
         // degree padding
-        println!("FRI: domain:{}, d: {}", domain_size, d);
+        // FIXME: see if power offset is needed
         let power_offset = (domain_size / blowup_factor) - d;
         let mut poly_offset = poly;
         if power_offset > 0 {
@@ -52,7 +61,7 @@ where
                 SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
             let shift = DensePolynomial::from(x_power).naive_mul(&poly_offset);
             poly_offset = poly_offset + shift;
-            println!("FRI: degree padding performed");
+            debug!("FRI: degree padding performed");
         }
 
         let mut rounds = Vec::<FriRound<D, F>>::with_capacity(round_num);
@@ -74,9 +83,11 @@ where
 
     pub fn commit_phase(&mut self) -> Vec<Hash<D>> {
         assert_eq!(self.rounds.len(), 1);
-
+        info!(
+            "FRI proving: commit phase - folding poly by {} {} times",
+            self.rounds[0].config.inner_children, self.round_num
+        );
         let mut commits = Vec::new();
-        println!("number of rounds: {}", self.round_num);
         for i in 1..self.round_num {
             let previous_round = &self.rounds[i - 1];
             let commit = previous_round.commit.root();
@@ -92,9 +103,9 @@ where
             );
             let domain_size = folded_poly.degree() + 1;
 
-            println!("previous poly round coeffs: {:?}", previous_round.poly);
-            println!("foded poly coeffs: {:?}", folded_poly);
-            println!("folded poly degree:{}", folded_poly.degree());
+            trace!("previous poly round coeffs: {:?}", previous_round.poly);
+            trace!("foded poly coeffs: {:?}", folded_poly);
+            trace!("folded poly degree:{}", folded_poly.degree());
             let round = FriRound::<D, _>::new(folded_poly, domain_size, previous_round_config);
             self.rounds.push(round);
         }
@@ -108,6 +119,7 @@ where
     }
 
     pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), &str> {
+        info!("FRI prover: starting query phase");
         let mut betas = vec![0u8; 8 * self.queries]; // usize is 64-bits
         self.transcript.fill_challenge_bytes(&mut betas).unwrap();
         let betas = betas
@@ -125,6 +137,7 @@ where
         let mut previous_commit = &previous_round.commit;
         let mut previous_domain = &previous_round.domain;
         let config = previous_round.config.clone();
+        let mut round_num = 1;
         for round in rounds_iter {
             assert_eq!(
                 previous_domain.size() / config.inner_children,
@@ -159,7 +172,6 @@ where
                 let numerator = previous_poly.clone() - g;
                 let vanishing_poly = FriProver::<D, F>::calculate_vanishing_poly(&[x1, x2]);
                 let q = numerator / vanishing_poly;
-                println!("quotient: {:?}", q);
                 round_quotients.push(q.to_vec());
 
                 // merkle commits
@@ -174,7 +186,8 @@ where
             previous_poly = &round.poly;
             previous_commit = &round.commit;
             previous_domain = &round.domain;
-            println!("another round achieved");
+            debug!("FRI prover - query phase: round {round_num} achieved");
+            round_num += 1;
         }
 
         Ok((
@@ -189,14 +202,6 @@ where
 
     pub fn get_initial_commit(&self) -> Hash<D> {
         self.rounds[0].commit.root()
-    }
-
-    pub fn query_first_commit(&self, query: usize) -> (F, MerklePath<D, F>) {
-        let initial_commit = self.rounds[0].clone();
-        let x = initial_commit.domain.element(query);
-        let leaf = initial_commit.poly.evaluate(&x);
-        let path = initial_commit.commit.generate_proof(&leaf).unwrap();
-        (leaf, path)
     }
 
     fn calculate_vanishing_poly(roots: &[F]) -> DensePolynomial<F> {
