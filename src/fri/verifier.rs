@@ -38,6 +38,7 @@ where
             queries,
             merkle_config,
             blowup_factor,
+            ..
         } = config;
         let domain_size =
             1 << ceil_log2_k((degree + 1) * blowup_factor, merkle_config.inner_children);
@@ -101,17 +102,14 @@ where
         }
 
         let domain = Radix2EvaluationDomain::<F>::new(self.domain_size).unwrap();
-        let prev_x3s = betas.iter().map(|a| domain.element(*a)).collect::<Vec<F>>();
+        let mut prev_x3s = betas.iter().map(|a| domain.element(*a)).collect::<Vec<F>>();
         for (i, (round_points, round_queries)) in zip(proof.points, proof.queries).enumerate() {
             println!("Verification Round {}", i + 1);
 
             for (j, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2])) in
                 zip(round_points, round_queries).enumerate()
             {
-                // if j == 0 {
-                //     assert_eq!(x1, prev_x3s[j]);
-                // }
-                // // assert_eq!(x1, prev_x3);
+                assert_eq!(x1, prev_x3s[j]);
                 assert_eq!(-x1, x2);
                 assert_eq!(x1.pow([2]), x3);
 
@@ -133,7 +131,7 @@ where
                 commits[i].check_proof::<_>(path1);
                 assert!(path2.leaf_neighbours.contains(&y2));
                 commits[i].check_proof::<_>(path2);
-                // prev_x3 = x3;
+                prev_x3s[j] = x3;
             }
         }
 
@@ -166,6 +164,7 @@ mod test {
     #[test]
     fn test_verifier() {
         let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
+        let blowup_factor = 2;
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let degree = poly.degree();
         let hash = *Hash::<Sha256>::from_slice(&[
@@ -183,7 +182,7 @@ mod test {
         let config = FriConfig {
             queries: 1,
             merkle_config,
-            blowup_factor: 2,
+            blowup_factor,
         };
 
         let verifier = FriVerifier::<Sha256, Goldilocks>::new(MerkleRoot(hash), degree, config);

@@ -40,8 +40,6 @@ where
                 "query phase: choose a random element in the domain",
             );
 
-        println!("CONFIG: {} queries added", queries);
-
         this
     }
 }

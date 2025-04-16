@@ -75,19 +75,3 @@ impl<H: DuplexHash> UsizeReader for Arthur<'_, H, u8> {
         Ok(challenges)
     }
 }
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    fn assert_impls_stark_pattern<D, F>()
-    where
-        IOPattern<DigestBridge<D>>: StarkIOPattern<D, F>,
-        D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-        F: Field,
-    {
-    }
-
-    #[test]
-    fn test_new_stark_iopattern() {}
-}
