@@ -94,7 +94,7 @@ fn test_fibonacci_air_constrains() {
     }
 }
 
-#[test]
+#[test_log::test]
 fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
