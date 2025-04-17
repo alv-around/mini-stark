@@ -1,6 +1,7 @@
 use crate::{util::logarithm_of_two_k, Hash};
 use ark_ff::PrimeField;
 use digest::Digest;
+use log::trace;
 use std::marker::PhantomData;
 
 pub trait Tree {
@@ -63,7 +64,7 @@ impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
         let denominator = 1 - inner_children as i64;
         let node_num = (numerator / denominator) as usize;
         let mut nodes = Vec::with_capacity(node_num);
-        println!("Number of nodes in the tree: {node_num}");
+        trace!("Number of inner nodes in the tree: {node_num}");
 
         let mut distance = leaf_num;
         for external in inputs.chunks(leafs_per_node) {
@@ -73,7 +74,6 @@ impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
         }
 
         let mut current_nodes = leaf_num / leafs_per_node;
-        println!("current_nodes: {}", current_nodes);
         let nodes_left = node_num - current_nodes;
         for _ in 0..nodes_left {
             let idx = current_nodes - distance;
@@ -184,9 +184,11 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
 
         let leaf_neighbours = self.get_leaf_neighbours(leaf_index);
         let leaf_parent = self.get_parent_idx(leaf_index);
-        println!(
-            "leaf_idx: {} leaf parent: {} leaf_neighbours: {:?}",
-            leaf_index, leaf_parent, leaf_neighbours
+        trace!(
+            "generating merkle proof for leaf: {} leaf parent: {} leaf_neighbours: {:?}",
+            leaf_index,
+            leaf_parent,
+            leaf_neighbours
         );
         let path = self.calculate_path(leaf_parent);
         Ok(MerklePath {
@@ -202,25 +204,32 @@ pub struct MerklePath<D: Digest, F: PrimeField> {
     path: Vec<Vec<Hash<D>>>,
 }
 
+#[derive(Debug)]
 pub struct MerkleRoot<D: Digest>(pub Hash<D>);
 
 impl<D: Digest> MerkleRoot<D> {
     pub fn check_proof<F: PrimeField>(&self, proof: MerklePath<D, F>) -> bool {
         let mut previous = MerkleTree::<D, F>::calculate_from_leafs(&proof.leaf_neighbours);
+        trace!(
+            "Checking merkle proof for root ({:?}): {:?} | {:?}",
+            self.0,
+            proof.leaf_neighbours,
+            proof.path
+        );
 
         for (i, level) in proof.path.iter().enumerate() {
             if !level.contains(&previous) {
+                trace!("Merkle proof failed at level {}", i);
                 return false;
             }
 
             previous = MerkleTree::<D, F>::calculate_from_nodes(level);
-            println!("Merkle Verification: Round {i} done");
         }
 
         if previous == self.0 {
             return true;
         }
-        assert_eq!(previous, self.0);
+        trace!("Merkle proof root does not match MerkleRoot");
         false
     }
 }
@@ -359,7 +368,6 @@ mod test {
         let proof = tree.generate_proof(&f_one).unwrap();
         assert!(proof.leaf_neighbours.contains(&f_one));
         assert_eq!(proof.path.len(), 3);
-        println!("Proof: {:?}", proof);
         assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(proof));
 
         let tree = make_tree(TWO_FOUR);
@@ -368,7 +376,6 @@ mod test {
         let proof = tree.generate_proof(&f_one).unwrap();
         assert!(proof.leaf_neighbours.contains(&f_one));
         assert_eq!(proof.path.len(), 2);
-        println!("Proof: {:?}", proof);
         assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(proof));
     }
 }
