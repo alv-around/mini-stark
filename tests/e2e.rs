@@ -110,5 +110,5 @@ fn test_stark_prover() {
     let proof = proof_system.prove(claim, witness).unwrap();
 
     let is_alright = proof_system.verify(constrains, proof);
-    assert!(is_alright);
+    assert!(is_alright.unwrap());
 }

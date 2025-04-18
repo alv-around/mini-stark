@@ -1,5 +1,5 @@
 use crate::air::{Constrains, Matrix, Provable};
-use crate::error::ProverError;
+use crate::error::{ProverError, VerifierError};
 use crate::fiatshamir::{DigestIOWritter, StarkIOPattern};
 use crate::fri::{
     fiatshamir::{DigestReader, FriIOPattern},
@@ -185,7 +185,11 @@ where
         })
     }
 
-    pub fn verify(&self, constrains: Constrains<F>, proof: StarkProof<D, F>) -> bool {
+    pub fn verify(
+        &self,
+        constrains: Constrains<F>,
+        proof: StarkProof<D, F>,
+    ) -> Result<bool, VerifierError> {
         info!("Verification: start verification...");
         let StarkProof {
             arthur,
@@ -199,13 +203,13 @@ where
         } = proof;
         // 1. assert proof commits match transcript and calculate coset
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = self.0.io.to_arthur(&arthur);
-        assert_eq!(arthur.next_digest().unwrap(), trace_commit);
+        assert_eq!(arthur.next_digest()?, trace_commit);
 
-        let [shift]: [F; 1] = arthur.challenge_scalars().unwrap();
+        let [shift]: [F; 1] = arthur.challenge_scalars()?;
         let domain = Radix2EvaluationDomain::<F>::new(self.0.degree + 1).unwrap();
-        assert_eq!(arthur.next_digest().unwrap(), constrain_trace_commit);
+        assert_eq!(arthur.next_digest()?, constrain_trace_commit);
 
-        let [r]: [F; 1] = arthur.challenge_scalars().unwrap();
+        let [r]: [F; 1] = arthur.challenge_scalars()?;
         debug!("Verification: 1. proof commits match transcript");
 
         // 2. build validity polynomial assert it matches the the query values provided in
@@ -216,7 +220,7 @@ where
             .unwrap();
 
         let mut query_bytes = vec![0u8; 8 * self.0.constrain_queries];
-        arthur.fill_challenge_bytes(&mut query_bytes).unwrap();
+        arthur.fill_challenge_bytes(&mut query_bytes)?;
         let queries = query_bytes
             .chunks_exact_mut(8)
             .map(|bytes| usize::from_le_bytes(bytes.try_into().unwrap()) % lde_domain.size())
@@ -260,7 +264,7 @@ where
         debug!("Verification: 3. FRI verification passed");
 
         info!("Verification: proof verification completed");
-        true
+        Ok(true)
     }
 }
 
