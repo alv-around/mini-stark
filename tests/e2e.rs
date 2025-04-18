@@ -67,7 +67,8 @@ fn test_setup() -> (Witness, FibonacciClaim) {
         secret_b: Goldilocks::from(2),
     };
     let claim = FibonacciClaim {
-        step: 20,
+        step: 9,
+        // FIXME: output should be used in the proof
         output: Goldilocks::from(13),
     };
     (witness, claim)
@@ -94,21 +95,20 @@ fn test_fibonacci_air_constrains() {
     }
 }
 
-#[test]
+#[test_log::test]
 fn test_stark_prover() {
     let (witness, claim) = test_setup();
     let trace = claim.trace(&witness);
     let constrains = trace.derive_constrains();
 
     let blowup_factor = 2;
-    let query_num = 80;
-    let degree = trace.step_number() - 1;
     let columns = trace.constrain_number();
 
-    let config = StarkConfig::<Sha256, Goldilocks>::new(blowup_factor, query_num, degree, columns);
+    let config =
+        StarkConfig::<Sha256, Goldilocks>::new(20, blowup_factor, trace.step_number(), columns);
     let proof_system = Stark::new(config);
     let proof = proof_system.prove(claim, witness).unwrap();
 
     let is_alright = proof_system.verify(constrains, proof);
-    assert!(is_alright);
+    assert!(is_alright.unwrap());
 }

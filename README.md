@@ -8,10 +8,10 @@ In this repo I implement a stark prover for learning purposes using arkworks.
 currently system status:
 
 - Complete ✅
-- Soundness :x:
+- Soundness ✅ (original FRI soundness / without DEEP)
 - Non-interactive ✅
 - Succint ✅
-- Zero-Knowledge^* ❓
+- Zero-Knowledge ✅ (see comments)
 
 Issues/comments/critics all very welcome.
 

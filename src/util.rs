@@ -7,6 +7,8 @@ where
 {
     if number.gt(&T::zero()) {
         return number & (number - T::one()) == T::zero();
+    } else if number.eq(&T::zero()) {
+        return true;
     }
     false
 }
@@ -47,6 +49,7 @@ mod test {
 
     #[test]
     fn test_is_power_of_two() {
+        assert!(is_power_of_two(0u16));
         assert!(is_power_of_two(1u8));
         assert!(is_power_of_two(2u8));
         assert!(is_power_of_two(32u16));
@@ -54,7 +57,6 @@ mod test {
         assert!(is_power_of_two(512u64));
         assert!(is_power_of_two(1024usize));
 
-        assert!(!is_power_of_two(0u16));
         assert!(!is_power_of_two(24u32));
         assert!(!is_power_of_two(48usize));
     }

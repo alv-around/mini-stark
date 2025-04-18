@@ -1,7 +1,8 @@
 pub mod air;
-pub mod fiatshamir;
+pub mod error;
+mod fiatshamir;
 pub mod field;
-pub mod fri;
+mod fri;
 mod merkle;
 pub mod starks;
 mod util;
