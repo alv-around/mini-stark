@@ -50,9 +50,9 @@ where
         Self(config)
     }
 
-    pub fn prove<'a>(
+    pub fn prove(
         &self,
-        transcript: &'a mut Merlin<DigestBridge<D>>,
+        transcript: &mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
     ) -> Result<(FriProof<D, F>, Hash<D>, Vec<u8>), ProverError> {
         let d = poly.degree();
@@ -76,9 +76,9 @@ where
         Ok((proof, commit[0].clone(), transcript.transcript().to_vec()))
     }
 
-    pub fn commit_phase<'a>(
+    pub fn commit_phase(
         &self,
-        transcript: &'a mut Merlin<DigestBridge<D>>,
+        transcript: &mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
     ) -> Result<(Vec<Hash<D>>, Vec<FriRound<D, F>>), ProverError> {
         info!(
@@ -122,9 +122,9 @@ where
         Ok((commits, fri_rounds))
     }
 
-    pub fn query_phase<'a>(
+    pub fn query_phase(
         &self,
-        transcript: &'a mut Merlin<DigestBridge<D>>,
+        transcript: &mut Merlin<DigestBridge<D>>,
         fri_rounds: Vec<FriRound<D, F>>,
     ) -> Result<(FriProof<D, F>, Vec<u8>), ProverError> {
         info!("FRI prover: starting query phase");
@@ -139,8 +139,7 @@ where
         let mut points = Vec::new();
         let mut quotients = Vec::new();
 
-        let mut round_i = 0;
-        for (previous, round) in fri_rounds.into_iter().tuple_windows() {
+        for (round_i, (previous, round)) in fri_rounds.into_iter().tuple_windows().enumerate() {
             assert_eq!(
                 previous.domain.size() / self.0.merkle_config.inner_children,
                 round.domain.size()
@@ -186,7 +185,6 @@ where
             queries.push(round_queries);
             quotients.push(round_quotients);
             debug!("FRI prover - query phase: round {round_i} achieved");
-            round_i += 1;
         }
 
         Ok((
@@ -209,7 +207,7 @@ where
 }
 
 #[derive(Clone)]
-struct FriRound<D: Digest, F: PrimeField> {
+pub(super) struct FriRound<D: Digest, F: PrimeField> {
     poly: DensePolynomial<F>,
     commit: MerkleTree<D, F>,
     domain: Radix2EvaluationDomain<F>,
