@@ -8,6 +8,7 @@ use nimue::{
 };
 use std::mem::size_of;
 
+#[allow(dead_code)]
 pub trait UsizeIOWritter: ByteIOPattern + Sized {
     fn add_usize(self, count: usize, label: &str) -> Self {
         self.add_bytes(count * 8, label)
@@ -59,6 +60,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub trait UsizeReader {
     fn next_usize(&mut self, length: usize) -> ProofResult<Vec<usize>>;
 }

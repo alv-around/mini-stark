@@ -27,7 +27,6 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     constrain_queries: Vec<MerklePath<D, F>>,
     validity_commit: Hash<D>,
     validity_queries: Vec<MerklePath<D, F>>,
-    fri_commit: Hash<D>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -166,7 +165,7 @@ where
 
         // 5.2 Make the low degree test FRI on the validity polynomial
         let fri = Fri::<D, _>::new(self.0.fri_config.clone());
-        let (fri_proof, fri_commit, _) = fri.prove(&mut merlin, validity_poly)?;
+        let (fri_proof, _) = fri.prove(&mut merlin, validity_poly)?;
         debug!("Proving: 5.2 FRI test proved");
 
         info!("Proving: Finished successfully!");
@@ -178,7 +177,6 @@ where
             constrain_queries,
             validity_commit,
             validity_queries,
-            fri_commit,
             fri_proof,
         })
     }
@@ -196,7 +194,6 @@ where
             constrain_queries,
             validity_commit,
             validity_queries,
-            fri_commit,
             fri_proof,
         } = proof;
         // 1. assert proof commits match transcript and calculate coset

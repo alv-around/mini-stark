@@ -4,7 +4,7 @@ use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
-use ark_poly::univariate::{DensePolynomial, SparsePolynomial};
+use ark_poly::univariate::DensePolynomial;
 use ark_poly::EvaluationDomain;
 use ark_poly::{DenseUVPolynomial, Polynomial};
 use digest::core_api::BlockSizeUser;
@@ -55,12 +55,11 @@ where
         &self,
         transcript: &mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
-    ) -> Result<(FriProof<D, F>, Hash<D>, Vec<u8>), ProverError> {
+    ) -> Result<(FriProof<D, F>, Vec<u8>), ProverError> {
         // INFO: here we don't need degree padding as we know poly is "full"
-        let (commit, fri_rounds) = self.commit_phase(transcript, poly)?;
+        let (_commits, fri_rounds) = self.commit_phase(transcript, poly)?;
         let (proof, _) = self.query_phase(transcript, fri_rounds)?;
-        // FIXME: change interface so commit is not needed
-        Ok((proof, commit[0].clone(), transcript.transcript().to_vec()))
+        Ok((proof, transcript.transcript().to_vec()))
     }
 
     fn commit_phase(
@@ -203,7 +202,6 @@ where
         );
 
         let Transcript(commits, alphas, betas) = self.read_proof_transcript(arthur).unwrap();
-        // assert_eq!(1 << commits.len(), self.domain_size);
         assert_eq!(commits.len(), self.0.rounds);
         assert_eq!(commits.len() - 1, proof.points.len());
 
