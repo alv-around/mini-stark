@@ -510,6 +510,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "error_set"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a5cfac9e0befd56d4a6f7ffdad3558f798d1fc005dfaaa99ed5202efd7abec6"
+dependencies = [
+ "error_set_impl",
+]
+
+[[package]]
+name = "error_set_impl"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4937429fd4e1421897226f4337c9e1a4c4206f886828e51dea621cbdcb9fd38"
+dependencies = [
+ "indices",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1011,6 +1033,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indices"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e125c680c3871dc195cfd3ff94a877a78f31d5e9c1a3a62cce82689ece14bf7"
+
+[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1180,6 +1208,7 @@ dependencies = [
  "ark-test-curves",
  "digest",
  "env_logger",
+ "error_set",
  "itertools 0.14.0",
  "log",
  "nimue",

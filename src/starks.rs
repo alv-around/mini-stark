@@ -1,4 +1,5 @@
 use crate::air::{Constrains, Matrix, Provable};
+use crate::error::ProverError;
 use crate::fiatshamir::{DigestIOWritter, StarkIOPattern};
 use crate::fri::{
     fiatshamir::{DigestReader, FriIOPattern},
@@ -17,7 +18,6 @@ use digest::{Digest, FixedOutputReset};
 use log::{debug, error, info};
 use nimue::plugins::ark::{FieldChallenges, FieldIOPattern};
 use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, IOPattern};
-use std::error::Error;
 use std::iter::zip;
 use std::marker::PhantomData;
 
@@ -65,7 +65,7 @@ where
         &self,
         air: AIR,
         witness: T,
-    ) -> Result<StarkProof<D, F>, Box<dyn Error>> {
+    ) -> Result<StarkProof<D, F>, ProverError> {
         let mut merlin = self.0.io.to_merlin();
         info!("Proving: start proving...");
         // 1. compute trace and commit to trace
@@ -74,7 +74,7 @@ where
         let trace_codeword =
             MerkleTree::<D, F>::new(trace.trace.get_data(), self.0.merkle_config.clone());
         let trace_commit = trace_codeword.root();
-        merlin.add_bytes(&trace_commit).unwrap();
+        merlin.add_bytes(&trace_commit)?;
         debug!(
             "Proving: 1. original trace ({:?}) committed",
             trace_commit.to_ascii_lowercase()
@@ -82,7 +82,7 @@ where
 
         // 2. calculate low degree extension of the original trace
         let lde_domain_size = self.0.blowup_factor * trace_domain.size();
-        let [random_shift]: [F; 1] = merlin.challenge_scalars().unwrap();
+        let [random_shift]: [F; 1] = merlin.challenge_scalars()?;
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size)
             .unwrap()
             .get_coset(random_shift)
@@ -96,7 +96,7 @@ where
         let constrain_trace_codeword =
             MerkleTree::<D, F>::new(constrain_trace.get_data(), self.0.merkle_config.clone());
         let constrain_trace_commit = constrain_trace_codeword.root();
-        merlin.add_bytes(&constrain_trace_commit).unwrap();
+        merlin.add_bytes(&constrain_trace_commit)?;
         debug!(
             "domain size: {} | lde domain size: {} | blowup factor: {}",
             trace_domain.size(),
@@ -109,7 +109,7 @@ where
         );
 
         // 3. mix constrains polynomial into the validity polynomial
-        let r: [F; 1] = merlin.challenge_scalars().unwrap();
+        let r: [F; 1] = merlin.challenge_scalars()?;
         debug!("random variable for mixing r: {:?}", r);
         let mut mixed_constrain_poly = DensePolynomial::<_>::from_coefficients_vec(vec![F::ZERO]);
         // parametric batching g = f_0 + r f_1 + r^2 f_2 + .. + r^(n-1) f_{n-1}
@@ -139,7 +139,7 @@ where
         // 5. Proving: receive random queries from verifier and prove the queries correspond to the
         //    previous work. This include to main steps:
         let mut query_bytes = vec![0u8; 8 * self.0.constrain_queries];
-        merlin.fill_challenge_bytes(&mut query_bytes).unwrap();
+        merlin.fill_challenge_bytes(&mut query_bytes)?;
         let queries = query_bytes
             .chunks_exact_mut(8)
             .map(|bytes| usize::from_le_bytes(bytes.try_into().unwrap()) % lde_domain_size)
@@ -155,17 +155,13 @@ where
         for query in queries.into_iter() {
             // constrain queries
             let leaf = constrain_trace.get_value(query, 0);
-            match constrain_trace_codeword.generate_proof(leaf) {
-                Ok(path) => constrain_queries.push(path),
-                Err(err) => error!("{}", err),
-            }
+            let path = constrain_trace_codeword.generate_proof(leaf)?;
+            constrain_queries.push(path);
 
             // validity query
             let leaf = validity_trace.get_value(query, 0);
-            match validity_codeword.generate_proof(leaf) {
-                Ok(path) => validity_queries.push(path),
-                Err(err) => error!("{}", err),
-            }
+            let path = validity_codeword.generate_proof(leaf)?;
+            validity_queries.push(path);
         }
         debug!("Proving: 5.1 queries to committed traces provided");
 

@@ -1,4 +1,4 @@
-use crate::{util::logarithm_of_two_k, Hash};
+use crate::{error::MerkleProofError, util::logarithm_of_two_k, Hash};
 use ark_ff::PrimeField;
 use digest::Digest;
 use log::trace;
@@ -120,28 +120,34 @@ impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
 
 impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
     // TODO: better error handling
-    fn get_parent_idx(&self, index: usize) -> usize {
+    fn get_parent_idx(&self, index: usize) -> Result<usize, MerkleProofError> {
         let root_idx = self.get_node_number() - 1;
         match index.cmp(&root_idx) {
-            std::cmp::Ordering::Greater => panic!("index outside of tree length"),
-            std::cmp::Ordering::Equal => panic!("index is root node"),
+            std::cmp::Ordering::Greater => Err(MerkleProofError::OutOfRangeError {
+                msg: "index outside of tree length",
+            }),
+            std::cmp::Ordering::Equal => Err(MerkleProofError::OutOfRangeError {
+                msg: "index is root node",
+            }),
             std::cmp::Ordering::Less => {
                 if index < self.leafs.len() {
-                    self.leafs.len() + index / self.config.leafs_per_node
+                    Ok(self.leafs.len() + index / self.config.leafs_per_node)
                 } else {
-                    index + (self.get_node_number() - index + 1) / self.config.inner_children
+                    Ok(index + (self.get_node_number() - index + 1) / self.config.inner_children)
                 }
             }
         }
     }
 
-    fn get_leaf_index(&self, node: &F) -> Option<usize> {
+    fn get_leaf_index(&self, node: &F) -> Result<usize, MerkleProofError> {
         for (i, value) in self.leafs.iter().enumerate() {
             if *node == *value {
-                return Some(i);
+                return Ok(i);
             }
         }
-        None
+        Err(MerkleProofError::LeafNotFound {
+            msg: "leaf is not included in the tree",
+        })
     }
 
     fn get_leaf_neighbours(&self, index: usize) -> Vec<F> {
@@ -161,36 +167,32 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
         self.nodes[start_idx..end_idx].to_vec()
     }
 
-    fn calculate_path(&self, index: usize) -> Vec<Vec<Hash<D>>> {
+    fn calculate_path(&self, index: usize) -> Result<Vec<Vec<Hash<D>>>, MerkleProofError> {
         let mut path = Vec::new();
         let mut current_idx = index;
         for _ in 1..self.levels {
             let neighbor = self.get_inner_neighbours(current_idx);
             path.push(neighbor);
 
-            let parent = self.get_parent_idx(current_idx);
+            let parent = self.get_parent_idx(current_idx)?;
             current_idx = parent;
         }
 
-        path
+        Ok(path)
     }
 
-    pub fn generate_proof(&self, leaf: &F) -> Result<MerklePath<D, F>, &str> {
-        let leaf_index = self.get_leaf_index(leaf);
-        if leaf_index.is_none() {
-            return Err("leaf is not included in the tree");
-        }
-        let leaf_index = leaf_index.unwrap();
+    pub fn generate_proof(&self, leaf: &F) -> Result<MerklePath<D, F>, MerkleProofError> {
+        let leaf_index = self.get_leaf_index(leaf)?;
 
         let leaf_neighbours = self.get_leaf_neighbours(leaf_index);
-        let leaf_parent = self.get_parent_idx(leaf_index);
+        let leaf_parent = self.get_parent_idx(leaf_index)?;
         trace!(
             "generating merkle proof for leaf: {} leaf parent: {} leaf_neighbours: {:?}",
             leaf_index,
             leaf_parent,
             leaf_neighbours
         );
-        let path = self.calculate_path(leaf_parent);
+        let path = self.calculate_path(leaf_parent)?;
         Ok(MerklePath {
             leaf_neighbours,
             path,
@@ -318,43 +320,41 @@ mod test {
     fn test_merkle_tree_parent_index() {
         let tree = make_tree(TWO);
         // first level test
-        assert_eq!(tree.get_parent_idx(1), 16);
-        assert_eq!(tree.get_parent_idx(4), 18);
-        assert_eq!(tree.get_parent_idx(9), 20);
-        assert_eq!(tree.get_parent_idx(13), 22);
+        assert_eq!(tree.get_parent_idx(1).unwrap(), 16);
+        assert_eq!(tree.get_parent_idx(4).unwrap(), 18);
+        assert_eq!(tree.get_parent_idx(9).unwrap(), 20);
+        assert_eq!(tree.get_parent_idx(13).unwrap(), 22);
         // second level ..
-        assert_eq!(tree.get_parent_idx(16), 24);
-        assert_eq!(tree.get_parent_idx(18), 25);
-        assert_eq!(tree.get_parent_idx(20), 26);
-        assert_eq!(tree.get_parent_idx(22), 27);
+        assert_eq!(tree.get_parent_idx(16).unwrap(), 24);
+        assert_eq!(tree.get_parent_idx(18).unwrap(), 25);
+        assert_eq!(tree.get_parent_idx(20).unwrap(), 26);
+        assert_eq!(tree.get_parent_idx(22).unwrap(), 27);
         // thrid level ..
-        assert_eq!(tree.get_parent_idx(24), 28);
-        assert_eq!(tree.get_parent_idx(25), 28);
-        assert_eq!(tree.get_parent_idx(26), 29);
-        assert_eq!(tree.get_parent_idx(27), 29);
+        assert_eq!(tree.get_parent_idx(24).unwrap(), 28);
+        assert_eq!(tree.get_parent_idx(25).unwrap(), 28);
+        assert_eq!(tree.get_parent_idx(26).unwrap(), 29);
+        assert_eq!(tree.get_parent_idx(27).unwrap(), 29);
         // fourth level ..
-        assert_eq!(tree.get_parent_idx(28), 30);
-        assert_eq!(tree.get_parent_idx(29), 30);
+        assert_eq!(tree.get_parent_idx(28).unwrap(), 30);
+        assert_eq!(tree.get_parent_idx(29).unwrap(), 30);
 
         let tree = make_tree(TWO_FOUR);
         // first level test
-        assert_eq!(tree.get_parent_idx(1), 16);
-        assert_eq!(tree.get_parent_idx(4), 17);
-        assert_eq!(tree.get_parent_idx(9), 18);
-        assert_eq!(tree.get_parent_idx(13), 19);
+        assert_eq!(tree.get_parent_idx(1).unwrap(), 16);
+        assert_eq!(tree.get_parent_idx(4).unwrap(), 17);
+        assert_eq!(tree.get_parent_idx(9).unwrap(), 18);
+        assert_eq!(tree.get_parent_idx(13).unwrap(), 19);
         // second level ..
-        assert_eq!(tree.get_parent_idx(16), 20);
-        assert_eq!(tree.get_parent_idx(17), 20);
-        assert_eq!(tree.get_parent_idx(18), 21);
-        assert_eq!(tree.get_parent_idx(19), 21);
+        assert_eq!(tree.get_parent_idx(16).unwrap(), 20);
+        assert_eq!(tree.get_parent_idx(17).unwrap(), 20);
+        assert_eq!(tree.get_parent_idx(18).unwrap(), 21);
+        assert_eq!(tree.get_parent_idx(19).unwrap(), 21);
         // third level ..
-        assert_eq!(tree.get_parent_idx(20), 22);
-        assert_eq!(tree.get_parent_idx(21), 22);
+        assert_eq!(tree.get_parent_idx(20).unwrap(), 22);
+        assert_eq!(tree.get_parent_idx(21).unwrap(), 22);
 
         // test that calling and index out of tree length panics
-        let result = panic::catch_unwind(|| {
-            tree.get_parent_idx(tree.get_node_number());
-        });
+        let result = tree.get_parent_idx(tree.get_node_number());
         assert!(result.is_err());
     }
 
