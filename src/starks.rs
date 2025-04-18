@@ -255,12 +255,9 @@ where
         debug!("Verification: 2.2 linking between validity and constrain polynomials successfull");
 
         // 3. run fri
-        // let fri_root = MerkleRoot::<D>(fri_commit);
-        // let fri_verifier =
-        // FriVerifier::<D, F>::new(fri_root, self.0.degree, self.0.fri_config.clone());
-        // assert!(fri_verifier.verify(fri_proof, &mut arthur).unwrap());
-        // debug!("Verification: 3. FRI verification passed");
-        panic!("Implement fri verification");
+        let fri_verifier = Fri::<D, F>::new(self.0.fri_config.clone());
+        assert!(fri_verifier.verify(fri_proof, &mut arthur).unwrap());
+        debug!("Verification: 3. FRI verification passed");
 
         info!("Verification: proof verification completed");
         Ok(true)

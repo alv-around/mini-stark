@@ -1,5 +1,6 @@
-use crate::error::ProverError;
-use crate::merkle::{MerklePath, MerkleTree, MerkleTreeConfig, Tree};
+use crate::error::{ProverError, VerifierError};
+use crate::fiatshamir::DigestReader;
+use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
@@ -11,8 +12,8 @@ use digest::{Digest, FixedOutputReset};
 use itertools::Itertools;
 use log::{debug, info, trace};
 use nimue::plugins::ark::FieldChallenges;
-use nimue::DigestBridge;
-use nimue::{ByteChallenges, ByteWriter, Merlin};
+use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, Merlin};
+use std::iter::zip;
 
 #[derive(Clone)]
 pub struct FriProof<D: Digest, F: PrimeField> {
@@ -55,28 +56,14 @@ where
         transcript: &mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
     ) -> Result<(FriProof<D, F>, Hash<D>, Vec<u8>), ProverError> {
-        let d = poly.degree();
-        let domain_size = 1 << self.0.rounds;
-
-        // degree padding
-        // FIXME: see if power offset is needed
-        let power_offset = (domain_size / self.0.blowup_factor) - d;
-        let mut poly_offset = poly;
-        if power_offset > 0 {
-            let x_power =
-                SparsePolynomial::<F>::from_coefficients_vec(vec![(power_offset, F::ONE)]);
-            let shift = DensePolynomial::from(x_power).naive_mul(&poly_offset);
-            poly_offset = poly_offset + shift;
-            debug!("FRI: degree padding performed");
-        }
-
-        let (commit, fri_rounds) = self.commit_phase(transcript, poly_offset)?;
+        // INFO: here we don't need degree padding as we know poly is "full"
+        let (commit, fri_rounds) = self.commit_phase(transcript, poly)?;
         let (proof, _) = self.query_phase(transcript, fri_rounds)?;
         // FIXME: change interface so commit is not needed
         Ok((proof, commit[0].clone(), transcript.transcript().to_vec()))
     }
 
-    pub fn commit_phase(
+    fn commit_phase(
         &self,
         transcript: &mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
@@ -127,7 +114,7 @@ where
         Ok((commits, fri_rounds))
     }
 
-    pub fn query_phase(
+    fn query_phase(
         &self,
         transcript: &mut Merlin<DigestBridge<D>>,
         fri_rounds: Vec<FriRound<D, F>>,
@@ -202,6 +189,92 @@ where
         ))
     }
 
+    pub fn verify(
+        &self,
+        proof: FriProof<D, F>,
+        arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
+    ) -> Result<bool, VerifierError> {
+        info!(
+            "*******\n
+            Starting FRI Verification with following config:
+            rounds: {} | blowup_factor: {} \n
+            *******\n",
+            self.0.rounds, self.0.blowup_factor,
+        );
+
+        let Transcript(commits, alphas, betas) = self.read_proof_transcript(arthur).unwrap();
+        // assert_eq!(1 << commits.len(), self.domain_size);
+        assert_eq!(commits.len(), self.0.rounds);
+        assert_eq!(commits.len() - 1, proof.points.len());
+
+        let domain = Radix2EvaluationDomain::<F>::new(1 << self.0.rounds).unwrap();
+        let mut prev_x3s = betas.iter().map(|a| domain.element(*a)).collect::<Vec<F>>();
+        for (i, (round_points, round_queries)) in zip(proof.points, proof.queries).enumerate() {
+            debug!("FRI Verifier: verification Round {}", i + 1);
+
+            for (j, ([(x1, y1), (x2, y2), (x3, y3)], [path1, path2])) in
+                zip(round_points, round_queries).enumerate()
+            {
+                assert_eq!(x1, prev_x3s[j]);
+                assert_eq!(-x1, x2);
+                assert_eq!(x1.pow([2]), x3);
+
+                let quotient =
+                    DensePolynomial::from_coefficients_vec(proof.quotients[i][j].clone());
+                let vanishing_poly = Self::calculate_vanishing_poly(&[x1, x2, x3]);
+                let total_degree = quotient.degree() + vanishing_poly.degree();
+                assert!(total_degree >= 2);
+                assert!(total_degree <= 1 << (self.0.rounds - i));
+                let _ = quotient / vanishing_poly;
+
+                // linearity test
+                let a = (y2 - y1) / (x2 - x1);
+                let b = y1 - a * x1;
+                let g = DensePolynomial::from_coefficients_vec(vec![b, a]);
+                assert_eq!(g.evaluate(&alphas[i]), y3);
+
+                assert!(path1.leaf_neighbours.contains(&y1));
+                commits[i].check_proof::<_>(path1);
+                assert!(path2.leaf_neighbours.contains(&y2));
+                commits[i].check_proof::<_>(path2);
+                prev_x3s[j] = x3;
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn read_proof_transcript(
+        &self,
+        arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
+    ) -> Result<Transcript<D, F>, VerifierError> {
+        debug!("FRI Verifier: reading proof transcript");
+        let mut commits = Vec::new();
+        let mut alphas = Vec::new();
+        let domain_size = 1 << self.0.rounds;
+
+        for _ in 1..self.0.rounds {
+            let digest = arthur.next_digest()?;
+            commits.push(MerkleRoot(digest));
+
+            let alpha: [F; 1] = arthur.challenge_scalars()?;
+            alphas.push(alpha[0]);
+        }
+
+        let digest = arthur.next_digest()?;
+        commits.push(MerkleRoot(digest));
+
+        let mut betas = vec![0u8; 8 * self.0.queries];
+        arthur.fill_challenge_bytes(&mut betas)?;
+        let betas = betas
+            .chunks_exact(8)
+            .map(|a| usize::from_le_bytes(a.try_into().unwrap()))
+            .map(|a| if a > domain_size { a % domain_size } else { a })
+            .collect();
+
+        Ok(Transcript(commits, alphas, betas))
+    }
+
     fn calculate_vanishing_poly(roots: &[F]) -> DensePolynomial<F> {
         roots
             .iter()
@@ -210,6 +283,8 @@ where
             .unwrap()
     }
 }
+
+pub(super) struct Transcript<D: Digest, F: PrimeField>(Vec<MerkleRoot<D>>, Vec<F>, Vec<usize>);
 
 #[derive(Clone)]
 pub(super) struct FriRound<D: Digest, F: PrimeField> {
