@@ -1,15 +1,14 @@
 use crate::air::{Constrains, Matrix, Provable};
 use crate::error::{ProverError, VerifierError};
 use crate::fiatshamir::{DigestIOWritter, StarkIOPattern};
-use crate::fri::{
-    fiatshamir::{DigestReader, FriIOPattern},
-    prover::FriProver,
-    verifier::FriVerifier,
-};
-use crate::fri::{FriConfig, FriProof};
+use crate::fri::{Fri, FriConfig, FriProof};
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
 use crate::util::ceil_log2_k;
 use crate::Hash;
+use crate::{
+    fiatshamir::{DigestReader, FriIOPattern},
+    // verifier::FriVerifier,
+};
 use ark_ff::{PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
@@ -166,9 +165,8 @@ where
         debug!("Proving: 5.1 queries to committed traces provided");
 
         // 5.2 Make the low degree test FRI on the validity polynomial
-        let prover = FriProver::<D, _>::new(&mut merlin, validity_poly, self.0.fri_config.clone());
-        let fri_commit = prover.get_initial_commit();
-        let (fri_proof, _) = prover.prove()?;
+        let fri = Fri::<D, _>::new(self.0.fri_config.clone());
+        let (fri_proof, fri_commit, _) = fri.prove(&mut merlin, validity_poly)?;
         debug!("Proving: 5.2 FRI test proved");
 
         info!("Proving: Finished successfully!");
@@ -257,11 +255,12 @@ where
         debug!("Verification: 2.2 linking between validity and constrain polynomials successfull");
 
         // 3. run fri
-        let fri_root = MerkleRoot::<D>(fri_commit);
-        let fri_verifier =
-            FriVerifier::<D, F>::new(fri_root, self.0.degree, self.0.fri_config.clone());
-        assert!(fri_verifier.verify(fri_proof, &mut arthur).unwrap());
-        debug!("Verification: 3. FRI verification passed");
+        // let fri_root = MerkleRoot::<D>(fri_commit);
+        // let fri_verifier =
+        // FriVerifier::<D, F>::new(fri_root, self.0.degree, self.0.fri_config.clone());
+        // assert!(fri_verifier.verify(fri_proof, &mut arthur).unwrap());
+        // debug!("Verification: 3. FRI verification passed");
+        panic!("Implement fri verification");
 
         info!("Verification: proof verification completed");
         Ok(true)
@@ -315,6 +314,7 @@ where
             fri_config: FriConfig {
                 queries: fri_queries,
                 blowup_factor,
+                rounds,
                 merkle_config: MerkleTreeConfig {
                     leafs_per_node: 2,
                     inner_children: 2,

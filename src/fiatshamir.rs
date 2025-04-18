@@ -44,7 +44,7 @@ where
     Self: FieldIOPattern<F> + DigestIOWritter<D> + FriIOPattern<D, F>,
 {
     fn new_stark(
-        domain_size: usize,
+        rounds: usize,
         constrain_queries: usize,
         fri_queries: usize,
         domsep: &str,
@@ -55,7 +55,7 @@ where
             .add_digest(1, "commit to quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
             .challenge_bytes(8 * constrain_queries, "retrive random queries")
-            .add_fri(domain_size, fri_queries)
+            .add_fri(rounds, fri_queries)
     }
 }
 
@@ -77,8 +77,8 @@ impl<H: DuplexHash> UsizeReader for Arthur<'_, H, u8> {
 }
 
 pub trait FriIOPattern<D: Digest, F: Field> {
-    fn new_fri(domsep: &str, round_numbers: usize, queries: usize) -> Self;
-    fn add_fri(self, round_numbers: usize, queries: usize) -> Self;
+    fn new_fri(domsep: &str, rounds: usize, queries: usize) -> Self;
+    fn add_fri(self, rounds: usize, queries: usize) -> Self;
 }
 
 impl<D, F> FriIOPattern<D, F> for IOPattern<DigestBridge<D>>
@@ -87,13 +87,13 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D>,
 {
-    fn new_fri(domsep: &str, round_numbers: usize, queries: usize) -> Self {
-        IOPattern::new(domsep).add_fri(round_numbers, queries)
+    fn new_fri(domsep: &str, rounds: usize, queries: usize) -> Self {
+        IOPattern::new(domsep).add_fri(rounds, queries)
     }
 
-    fn add_fri(self, round_numbers: usize, queries: usize) -> Self {
+    fn add_fri(self, rounds: usize, queries: usize) -> Self {
         let mut this = self;
-        for _ in 0..round_numbers - 1 {
+        for _ in 0..rounds - 1 {
             this = this
                 .add_digest(1, "add merkle commit: commit to fri round")
                 .challenge_scalars(1, "random scalar challenge: polynomial folding");
