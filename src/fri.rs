@@ -87,10 +87,13 @@ where
         );
         let mut commits = Vec::with_capacity(self.0.rounds);
         let mut fri_rounds = Vec::with_capacity(self.0.rounds);
-        let domain_size = 1 << self.0.rounds;
 
         // commit to the first round without folding
-        let first_round = FriRound::new(poly.clone(), domain_size, self.0.merkle_config.clone());
+        let first_round = FriRound::new(
+            poly.clone(),
+            self.0.blowup_factor,
+            self.0.merkle_config.clone(),
+        );
         let first_commit = first_round.commit.root();
         transcript.add_bytes(&first_commit)?;
         fri_rounds.push(first_round);
@@ -105,14 +108,16 @@ where
                 alpha,
                 self.0.merkle_config.inner_children,
             );
-            let domain_size = folded_poly.degree() + 1;
 
             trace!("previous poly round coeffs: {:?}", previous_poly);
             trace!("foded poly coeffs: {:?}", folded_poly);
             trace!("folded poly degree:{}", folded_poly.degree());
             previous_poly = folded_poly.clone();
-            let round =
-                FriRound::<D, _>::new(folded_poly, domain_size, self.0.merkle_config.clone());
+            let round = FriRound::<D, _>::new(
+                folded_poly,
+                self.0.blowup_factor,
+                self.0.merkle_config.clone(),
+            );
             let round_commit = round.commit.root();
             transcript.add_bytes(&round_commit)?;
             fri_rounds.push(round);
@@ -211,7 +216,6 @@ pub(super) struct FriRound<D: Digest, F: PrimeField> {
     poly: DensePolynomial<F>,
     commit: MerkleTree<D, F>,
     domain: Radix2EvaluationDomain<F>,
-    config: MerkleTreeConfig<D, F>,
 }
 
 impl<D, F> FriRound<D, F>
@@ -219,16 +223,15 @@ where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     F: PrimeField,
 {
-    fn new(poly: DensePolynomial<F>, domain_size: usize, config: MerkleTreeConfig<D, F>) -> Self {
+    fn new(poly: DensePolynomial<F>, blowup_factor: usize, config: MerkleTreeConfig<D, F>) -> Self {
+        let domain_size = (poly.degree() + 1) * blowup_factor;
         let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
-        let config_clone = config.clone();
-        let commit = FriRound::<D, F>::codeword_commit(&poly, domain, config_clone);
+        let commit = FriRound::<D, F>::codeword_commit(&poly, domain, config);
 
         Self {
             commit,
             poly,
             domain,
-            config,
         }
     }
 
