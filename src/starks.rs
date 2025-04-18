@@ -168,7 +168,7 @@ where
         // 5.2 Make the low degree test FRI on the validity polynomial
         let prover = FriProver::<D, _>::new(&mut merlin, validity_poly, self.0.fri_config.clone());
         let fri_commit = prover.get_initial_commit();
-        let (fri_proof, _) = prover.prove();
+        let (fri_proof, _) = prover.prove()?;
         debug!("Proving: 5.2 FRI test proved");
 
         info!("Proving: Finished successfully!");
@@ -260,7 +260,7 @@ where
         let fri_root = MerkleRoot::<D>(fri_commit);
         let fri_verifier =
             FriVerifier::<D, F>::new(fri_root, self.0.degree, self.0.fri_config.clone());
-        assert!(fri_verifier.verify(fri_proof, &mut arthur));
+        assert!(fri_verifier.verify(fri_proof, &mut arthur).unwrap());
         debug!("Verification: 3. FRI verification passed");
 
         info!("Verification: proof verification completed");

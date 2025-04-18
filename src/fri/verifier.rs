@@ -1,17 +1,17 @@
 use super::fiatshamir::DigestReader;
 use super::{FriConfig, FriProof};
+use crate::error::VerifierError;
 use crate::merkle::MerkleRoot;
 use crate::util::{ceil_log2_k, logarithm_of_two_k};
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial};
-use ark_std::test_rng;
 use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
 use log::{debug, info};
 use nimue::plugins::ark::FieldChallenges;
-use nimue::{Arthur, ByteChallenges, DigestBridge, IOPatternError};
+use nimue::{Arthur, ByteChallenges, DigestBridge};
 use std::iter::zip;
 use std::marker::PhantomData;
 
@@ -64,24 +64,24 @@ where
     pub fn read_proof_transcript(
         &self,
         arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
-    ) -> Result<Transcript<D, F>, IOPatternError> {
+    ) -> Result<Transcript<D, F>, VerifierError> {
         debug!("FRI Verifier: reading proof transcript");
         let mut commits = Vec::new();
         let mut alphas = Vec::new();
 
         for _ in 1..self.rounds {
-            let digest = arthur.next_digest().unwrap();
+            let digest = arthur.next_digest()?;
             commits.push(MerkleRoot(digest));
 
-            let alpha: [F; 1] = arthur.challenge_scalars().unwrap();
+            let alpha: [F; 1] = arthur.challenge_scalars()?;
             alphas.push(alpha[0]);
         }
 
-        let digest = arthur.next_digest().unwrap();
+        let digest = arthur.next_digest()?;
         commits.push(MerkleRoot(digest));
 
         let mut betas = vec![0u8; 8 * self.queries];
-        arthur.fill_challenge_bytes(&mut betas).unwrap();
+        arthur.fill_challenge_bytes(&mut betas)?;
         let betas = betas
             .chunks_exact(8)
             .map(|a| usize::from_le_bytes(a.try_into().unwrap()))
@@ -101,13 +101,12 @@ where
         &self,
         proof: FriProof<D, F>,
         arthur: &mut Arthur<'_, DigestBridge<D>, u8>,
-    ) -> bool {
+    ) -> Result<bool, VerifierError> {
         let Transcript(commits, alphas, betas) = self.read_proof_transcript(arthur).unwrap();
         assert_eq!(1 << commits.len(), self.domain_size);
         assert_eq!(self.commit.0, commits[0].0);
-        if commits.len() != self.rounds || commits.len() - 1 != proof.points.len() {
-            return false;
-        }
+        assert_eq!(commits.len(), self.rounds);
+        assert_eq!(commits.len() - 1, proof.points.len());
 
         let domain = Radix2EvaluationDomain::<F>::new(self.domain_size).unwrap();
         let mut prev_x3s = betas.iter().map(|a| domain.element(*a)).collect::<Vec<F>>();
@@ -143,11 +142,7 @@ where
             }
         }
 
-        true
-    }
-
-    pub fn draw_random_scalar() -> F {
-        F::rand(&mut test_rng())
+        Ok(true)
     }
 
     fn calculate_vanishing_poly(&self, roots: &[F]) -> DensePolynomial<F> {

@@ -1,4 +1,5 @@
 use super::{FriConfig, FriProof};
+use crate::error::ProverError;
 use crate::merkle::{MerkleTree, MerkleTreeConfig, Tree};
 use crate::Hash;
 use ark_ff::PrimeField;
@@ -76,12 +77,12 @@ where
         }
     }
 
-    pub fn prove(mut self) -> (FriProof<D, F>, Vec<u8>) {
-        self.commit_phase();
-        self.query_phase().unwrap()
+    pub fn prove(mut self) -> Result<(FriProof<D, F>, Vec<u8>), ProverError> {
+        self.commit_phase()?;
+        self.query_phase()
     }
 
-    pub fn commit_phase(&mut self) -> Vec<Hash<D>> {
+    pub fn commit_phase(&mut self) -> Result<Vec<Hash<D>>, ProverError> {
         assert_eq!(self.rounds.len(), 1);
         info!(
             "FRI proving: commit phase - folding poly by {} {} times",
@@ -91,11 +92,11 @@ where
         for i in 1..self.round_num {
             let previous_round = &self.rounds[i - 1];
             let commit = previous_round.commit.root();
-            self.transcript.add_bytes(&commit).unwrap();
+            self.transcript.add_bytes(&commit)?;
             commits.push(commit);
             let previous_round_config = previous_round.config.clone();
 
-            let alpha: [F; 1] = self.transcript.challenge_scalars().unwrap();
+            let alpha: [F; 1] = self.transcript.challenge_scalars()?;
             let folded_poly = FriRound::<D, _>::split_and_fold(
                 &previous_round.poly.clone(),
                 alpha[0],
@@ -112,16 +113,16 @@ where
 
         let previous_round = &self.rounds.last().unwrap();
         let commit = previous_round.commit.root();
-        self.transcript.add_bytes(&commit).unwrap();
+        self.transcript.add_bytes(&commit)?;
         commits.push(commit);
 
-        commits
+        Ok(commits)
     }
 
-    pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), &str> {
+    pub fn query_phase(&mut self) -> Result<(FriProof<D, F>, Vec<u8>), ProverError> {
         info!("FRI prover: starting query phase");
         let mut betas = vec![0u8; 8 * self.queries]; // usize is 64-bits
-        self.transcript.fill_challenge_bytes(&mut betas).unwrap();
+        self.transcript.fill_challenge_bytes(&mut betas)?;
         let betas = betas
             .chunks_exact(8)
             .map(|a| usize::from_le_bytes(a.try_into().unwrap()))
@@ -175,8 +176,8 @@ where
                 round_quotients.push(q.to_vec());
 
                 // merkle commits
-                let proof1 = previous_commit.generate_proof(&y1).unwrap();
-                let proof2 = previous_commit.generate_proof(&y2).unwrap();
+                let proof1 = previous_commit.generate_proof(&y1)?;
+                let proof2 = previous_commit.generate_proof(&y2)?;
                 round_queries.push([proof1, proof2]);
             }
 

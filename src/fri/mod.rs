@@ -62,10 +62,10 @@ mod test {
 
         let commit = fri_prover.get_initial_commit();
 
-        let (proof, transcript) = fri_prover.prove();
+        let (proof, transcript) = fri_prover.prove().unwrap();
         let verifier = FriVerifier::<Sha256, Goldilocks>::new(MerkleRoot(commit), degree, config);
 
         let mut arthur = io.to_arthur(&transcript);
-        assert!(verifier.verify(proof, &mut arthur));
+        assert!(verifier.verify(proof, &mut arthur).unwrap());
     }
 }
