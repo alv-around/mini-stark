@@ -97,6 +97,8 @@ where
         let mut this = self;
         for _ in 0..rounds - 1 {
             this = this
+                .challenge_scalars(1, "(DEEP) FRI: pick random z")
+                .add_scalars(2, "(DEEP) FRI: degree one B polynomial")
                 .challenge_scalars(1, "FRI COMMIT Phase: random scalar challenge")
                 .add_digest(1, "FRI COMMIT Phase: commit to folded codeword");
         }
