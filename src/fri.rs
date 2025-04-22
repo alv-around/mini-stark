@@ -81,7 +81,6 @@ where
             self.0.merkle_config.clone(),
         );
         let first_commit = first_round.commit.root();
-        transcript.add_bytes(&first_commit)?;
         fri_rounds.push(first_round);
         commits.push(first_commit);
 
@@ -202,8 +201,8 @@ where
         );
 
         let Transcript(commits, alphas, betas) = self.read_proof_transcript(arthur).unwrap();
-        assert_eq!(commits.len(), self.0.rounds);
-        assert_eq!(commits.len() - 1, proof.points.len());
+        assert_eq!(commits.len(), self.0.rounds - 1);
+        assert_eq!(commits.len(), proof.points.len());
 
         let domain = Radix2EvaluationDomain::<F>::new(1 << self.0.rounds).unwrap();
         let mut prev_x3s = betas.iter().map(|a| domain.element(*a)).collect::<Vec<F>>();
@@ -252,15 +251,12 @@ where
         let domain_size = 1 << self.0.rounds;
 
         for _ in 1..self.0.rounds {
-            let digest = arthur.next_digest()?;
-            commits.push(MerkleRoot(digest));
-
             let alpha: [F; 1] = arthur.challenge_scalars()?;
             alphas.push(alpha[0]);
-        }
 
-        let digest = arthur.next_digest()?;
-        commits.push(MerkleRoot(digest));
+            let digest = arthur.next_digest()?;
+            commits.push(MerkleRoot(digest));
+        }
 
         let mut betas = vec![0u8; 8 * self.0.queries];
         arthur.fill_challenge_bytes(&mut betas)?;

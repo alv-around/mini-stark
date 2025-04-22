@@ -97,12 +97,12 @@ where
         let mut this = self;
         for _ in 0..rounds - 1 {
             this = this
-                .add_digest(1, "add merkle commit: commit to fri round")
-                .challenge_scalars(1, "random scalar challenge: polynomial folding");
+                .challenge_scalars(1, "random scalar challenge: polynomial folding")
+                .add_digest(1, "add merkle commit: commit to fri round");
         }
 
         this = this
-            .add_digest(1, "add merkle commit: commit to last fri round")
+            // .add_digest(1, "add merkle commit: commit to last fri round")
             .challenge_bytes(
                 8 * queries,
                 "query phase: choose a random element in the domain",
