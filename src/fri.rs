@@ -1,7 +1,6 @@
 use crate::error::{ProverError, VerifierError};
 use crate::fiatshamir::DigestReader;
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
-use crate::Hash;
 use ark_ff::PrimeField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
@@ -57,7 +56,7 @@ where
         poly: DensePolynomial<F>,
     ) -> Result<(FriProof<D, F>, Vec<u8>), ProverError> {
         // INFO: here we don't need degree padding as we know poly is "full"
-        let (_commits, fri_rounds) = self.commit_phase(transcript, poly)?;
+        let fri_rounds = self.commit_phase(transcript, poly)?;
         let (proof, _) = self.query_phase(transcript, fri_rounds)?;
         Ok((proof, transcript.transcript().to_vec()))
     }
@@ -66,12 +65,11 @@ where
         &self,
         transcript: &mut Merlin<DigestBridge<D>>,
         poly: DensePolynomial<F>,
-    ) -> Result<(Vec<Hash<D>>, Vec<FriRound<D, F>>), ProverError> {
+    ) -> Result<Vec<FriRound<D, F>>, ProverError> {
         info!(
             "FRI proving: commit phase - folding poly by {} {} times",
             self.0.merkle_config.inner_children, self.0.rounds
         );
-        let mut commits = Vec::with_capacity(self.0.rounds);
         let mut fri_rounds = Vec::with_capacity(self.0.rounds);
         let round_domain_size = (poly.degree() + 1) * self.0.blowup_factor;
 
@@ -81,9 +79,7 @@ where
             round_domain_size,
             self.0.merkle_config.clone(),
         );
-        let first_commit = previous_round.commit.root();
         fri_rounds.push(previous_round.clone());
-        commits.push(first_commit);
 
         // in the sucsesive rounds fold poly nomial according to alpha
         for _ in 1..self.0.rounds {
@@ -110,11 +106,10 @@ where
                 FriRound::<D, _>::new(round_poly, domain_size, self.0.merkle_config.clone());
             let round_commit = previous_round.commit.root();
             transcript.add_bytes(&round_commit)?;
-            commits.push(round_commit);
             fri_rounds.push(previous_round.clone());
         }
 
-        Ok((commits, fri_rounds))
+        Ok(fri_rounds)
     }
 
     fn query_phase(
