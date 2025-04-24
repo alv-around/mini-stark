@@ -1,14 +1,11 @@
 use crate::air::{Constrains, Matrix, Provable};
 use crate::error::{ProverError, VerifierError};
 use crate::fiatshamir::{DigestIOWritter, StarkIOPattern};
+use crate::fiatshamir::{DigestReader, FriIOPattern};
 use crate::fri::{Fri, FriConfig, FriProof};
-use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
+use crate::merkle::{MerkleTree, MerkleTreeConfig, Tree};
 use crate::util::ceil_log2_k;
 use crate::Hash;
-use crate::{
-    fiatshamir::{DigestReader, FriIOPattern},
-    // verifier::FriVerifier,
-};
 use ark_ff::{PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
@@ -16,7 +13,7 @@ use digest::core_api::BlockSizeUser;
 use digest::{Digest, FixedOutputReset};
 use log::{debug, error, info};
 use nimue::plugins::ark::{FieldChallenges, FieldIOPattern};
-use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, IOPattern};
+use nimue::{Arthur, ByteWriter, DigestBridge, IOPattern};
 use std::iter::zip;
 use std::marker::PhantomData;
 
@@ -24,9 +21,8 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
     arthur: Vec<u8>,
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
-    constrain_queries: Vec<MerklePath<D, F>>,
-    validity_commit: Hash<D>,
-    validity_queries: Vec<MerklePath<D, F>>,
+    constrain_queries: Vec<Vec<F>>,
+    validity_queries: Vec<F>,
     fri_proof: FriProof<D, F>,
 }
 
@@ -66,7 +62,8 @@ where
     ) -> Result<StarkProof<D, F>, ProverError> {
         let mut merlin = self.0.io.to_merlin();
         info!("Proving: start proving...");
-        // 1. compute trace and commit to trace
+
+        // 1.1 compute trace and commit to trace
         let trace = air.trace(&witness);
         let trace_domain = trace.get_domain();
         let trace_codeword =
@@ -74,11 +71,11 @@ where
         let trace_commit = trace_codeword.root();
         merlin.add_bytes(&trace_commit)?;
         debug!(
-            "Proving: 1. original trace ({:?}) committed",
+            "Proving: 1.1 original trace ({:?}) committed",
             trace_commit.to_ascii_lowercase()
         );
 
-        // 2. calculate low degree extension of the original trace
+        // 1.2 calculate low degree extension of the original trace
         let lde_domain_size = self.0.blowup_factor * trace_domain.size();
         let [random_shift]: [F; 1] = merlin.challenge_scalars()?;
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size)
@@ -102,11 +99,11 @@ where
             self.0.blowup_factor
         );
         debug!(
-            "Proving: 2. constrain trace ({:?}) committed",
+            "Proving: 1.2 constrain trace ({:?}) committed",
             constrain_trace_commit.to_ascii_lowercase()
         );
 
-        // 3. mix constrains polynomial into the validity polynomial
+        // 1.3 mix constrains polynomial into the validity polynomial
         let r: [F; 1] = merlin.challenge_scalars()?;
         debug!("random variable for mixing r: {:?}", r);
         let mut mixed_constrain_poly = DensePolynomial::<_>::from_coefficients_vec(vec![F::ZERO]);
@@ -118,55 +115,39 @@ where
         }
         let (rest, validity_poly) = mixed_constrain_poly.divide_by_vanishing_poly(trace_domain);
         assert_eq!(rest, DensePolynomial::zero());
-        let validity_lde = validity_poly.clone().evaluate_over_domain(lde_domain);
-        debug!("Proving: 3. validity poly from mixing constrains",);
+        debug!("Proving: 1.3 validity poly from mixing constrains",);
 
-        // 4. commit to the validity polynomial
-        let mut validity_trace = Matrix::<F>::new(lde_domain_size, 1, None);
-        validity_trace.add_col(0, validity_lde.evals);
-        let validity_codeword = MerkleTree::<D, F>::new(
-            validity_trace.get_data(),
-            self.0.fri_config.merkle_config.clone(),
-        );
-        let validity_commit = validity_codeword.root();
+        // 2. DEEP-ALI: receive random queries from verifier and prove the queries correspond to the
+        //    previous work.
+        let mut queries = vec![F::ZERO; self.0.constrain_queries];
+        merlin.fill_challenge_scalars(&mut queries)?;
         debug!(
-            "Proving: 4. validity trace ({:?}) committed",
-            constrain_trace_commit.to_ascii_lowercase()
-        );
-
-        // 5. Proving: receive random queries from verifier and prove the queries correspond to the
-        //    previous work. This include to main steps:
-        let mut query_bytes = vec![0u8; 8 * self.0.constrain_queries];
-        merlin.fill_challenge_bytes(&mut query_bytes)?;
-        let queries = query_bytes
-            .chunks_exact_mut(8)
-            .map(|bytes| usize::from_le_bytes(bytes.try_into().unwrap()) % lde_domain_size)
-            .collect::<Vec<_>>();
-        debug!(
-            "Proving: 5. draw {} trace queries",
+            "Proving: 2. draw {} trace queries",
             self.0.constrain_queries
         );
 
-        // 5.1 Link the committed constrain trace to the validity trace
+        // 2.1 Link the committed constrain trace to the validity trace
         let mut constrain_queries = Vec::new();
         let mut validity_queries = Vec::new();
         for query in queries.into_iter() {
             // constrain queries
-            let leaf = constrain_trace.get_value(query, 0);
-            let path = constrain_trace_codeword.generate_proof(leaf)?;
-            constrain_queries.push(path);
+            let constrain_query: Vec<F> = constrains
+                .get_polynomials()
+                .iter()
+                .map(|constrain| constrain.evaluate(&query))
+                .collect();
+            constrain_queries.push(constrain_query);
 
             // validity query
-            let leaf = validity_trace.get_value(query, 0);
-            let path = validity_codeword.generate_proof(leaf)?;
-            validity_queries.push(path);
+            let validity_query = validity_poly.evaluate(&query);
+            validity_queries.push(validity_query);
         }
-        debug!("Proving: 5.1 queries to committed traces provided");
+        debug!("Proving: 2.1 queries to committed traces provided");
 
-        // 5.2 Make the low degree test FRI on the validity polynomial
+        // 3. DEEP-IOPP: Make the low degree test FRI on the validity polynomial
         let fri = Fri::<D, _>::new(self.0.fri_config.clone());
         let (fri_proof, _) = fri.prove(&mut merlin, validity_poly)?;
-        debug!("Proving: 5.2 FRI test proved");
+        debug!("Proving: 3 FRI test proved");
 
         info!("Proving: Finished successfully!");
         let arthur = merlin.transcript().to_vec();
@@ -175,7 +156,6 @@ where
             trace_commit,
             constrain_trace_commit,
             constrain_queries,
-            validity_commit,
             validity_queries,
             fri_proof,
         })
@@ -192,7 +172,6 @@ where
             trace_commit,
             constrain_trace_commit,
             constrain_queries,
-            validity_commit,
             validity_queries,
             fri_proof,
         } = proof;
@@ -200,7 +179,7 @@ where
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = self.0.io.to_arthur(&arthur);
         assert_eq!(arthur.next_digest()?, trace_commit);
 
-        let [shift]: [F; 1] = arthur.challenge_scalars()?;
+        let [_shift]: [F; 1] = arthur.challenge_scalars()?;
         let domain = Radix2EvaluationDomain::<F>::new(self.0.degree + 1).unwrap();
         assert_eq!(arthur.next_digest()?, constrain_trace_commit);
 
@@ -209,45 +188,29 @@ where
 
         // 2. build validity polynomial assert it matches the the query values provided in
         //    the proof
-        let lde_domain = Radix2EvaluationDomain::<F>::new(domain.size() * self.0.blowup_factor)
-            .unwrap()
-            .get_coset(shift)
-            .unwrap();
-
-        let mut query_bytes = vec![0u8; 8 * self.0.constrain_queries];
-        arthur.fill_challenge_bytes(&mut query_bytes)?;
-        let queries = query_bytes
-            .chunks_exact_mut(8)
-            .map(|bytes| usize::from_le_bytes(bytes.try_into().unwrap()) % lde_domain.size())
-            .collect::<Vec<_>>();
+        let mut queries = vec![F::ZERO; self.0.constrain_queries];
+        arthur.fill_challenge_scalars(&mut queries)?;
         debug!("Verification: 2.1 queries from transcript retrieved");
 
         // 2.2 assert that the queries provided from constrain trace match commit
         // build with this queries the validity polynomial
-        let validity_root = MerkleRoot::<D>(validity_commit);
-        let quotient_root = MerkleRoot::<D>(constrain_trace_commit);
         for (query, (constrain_query, validity_query)) in
             zip(queries, zip(constrain_queries, validity_queries))
         {
             let mut c_x = DensePolynomial::zero();
-            let mut leafs = Vec::new();
-            let w_i = lde_domain.element(query);
-            for (i, constrain) in constrains.get_polynomials().iter().enumerate() {
-                let leaf = constrain.evaluate(&w_i);
-                leafs.push(leaf);
-
+            for (i, (constrain, constrain_eval)) in
+                zip(constrains.get_polynomials(), constrain_query).enumerate()
+            {
+                assert_eq!(constrain.evaluate(&query), constrain_eval);
                 c_x = c_x
                     + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
             }
 
-            assert_eq!(leafs, constrain_query.leaf_neighbours);
-            assert!(quotient_root.check_proof(constrain_query));
             let (rest, quotient) = c_x.divide_by_vanishing_poly(domain);
             assert_eq!(rest, DensePolynomial::zero());
 
-            let evaluation = quotient.evaluate(&w_i);
-            assert!(validity_query.leaf_neighbours.contains(&evaluation));
-            assert!(validity_root.check_proof(validity_query));
+            let evaluation = quotient.evaluate(&query);
+            assert_eq!(evaluation, validity_query);
         }
         debug!("Verification: 2.2 linking between validity and constrain polynomials successfull");
 

@@ -55,7 +55,7 @@ where
             .challenge_scalars(1, "ZK: pick random shift of domain")
             .add_digest(1, "commit to quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
-            .challenge_bytes(8 * constrain_queries, "retrive random queries")
+            .challenge_scalars(constrain_queries, "number of queries in DEEP ALI")
             .add_fri(rounds, fri_queries)
     }
 }
