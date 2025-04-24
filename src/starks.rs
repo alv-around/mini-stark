@@ -303,7 +303,8 @@ where
             error!("STARK Config: security bits has to be at least 20");
             panic!("");
         }
-        let num_constrain_queries = security_bits.div_ceil(ceil_log2_k(blowup_factor, 2));
+        let log_steps = ceil_log2_k(steps, 2);
+        let linking_queries = security_bits.div_ceil(F::MODULUS_BIT_SIZE as usize - log_steps);
 
         let rounds = ceil_log2_k(steps * blowup_factor, 2);
         let rho = 1f64 / blowup_factor as f64;
@@ -311,7 +312,7 @@ where
         let total_fri_queries = (security_bits as f64) / denominator;
         let round_fri_queries = (total_fri_queries / (rounds as f64)).ceil() as usize;
 
-        (num_constrain_queries, round_fri_queries)
+        (linking_queries, round_fri_queries)
     }
 }
 
@@ -332,26 +333,27 @@ mod test {
     fn test_stark_config_query_numbers() {
         let blowup_factor = 4;
         let steps = 129;
+        assert_eq!(Goldilocks::MODULUS_BIT_SIZE, 64);
 
         // test query_number is at least 1
         let (constrain_queries, fri_queries) =
             StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(20, blowup_factor, steps);
-        assert_eq!(constrain_queries, 10);
+        assert_eq!(constrain_queries, 1);
         assert_eq!(fri_queries, 3);
 
         let (constrain_queries, fri_queries) =
             StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(20, 2, 9);
-        assert_eq!(constrain_queries, 20);
+        assert_eq!(constrain_queries, 1);
         assert_eq!(fri_queries, 10);
 
         // test that queries grow linearly with security bits
         let (constrain_queries, fri_queries) =
             StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(128, blowup_factor, steps);
-        assert_eq!(constrain_queries, 64);
+        assert_eq!(constrain_queries, 3);
         assert_eq!(fri_queries, 19);
         let (constrain_queries, fri_queries) =
             StarkConfig::<Sha256, Goldilocks>::num_queries_from_config(256, blowup_factor, 513);
-        assert_eq!(constrain_queries, 128);
+        assert_eq!(constrain_queries, 5);
         assert_eq!(fri_queries, 32);
     }
 }
