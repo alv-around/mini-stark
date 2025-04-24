@@ -58,13 +58,15 @@ impl<F: PrimeField> Matrix<F> {
     }
 }
 
+type Constrain<F> = Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>;
+
 pub struct TraceTable<F: PrimeField> {
     pub(super) trace: Matrix<F>,
     steps: usize,
     domain: Radix2EvaluationDomain<F>,
     pub omega: F,
     boundaries: Vec<(usize, usize)>,
-    transition_constrains: Vec<Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>>,
+    transition_constrains: Vec<Constrain<F>>,
 }
 
 impl<F: PrimeField> TraceTable<F> {
@@ -114,10 +116,7 @@ impl<F: PrimeField> TraceTable<F> {
         self.boundaries.push((row, col));
     }
 
-    pub fn add_transition_constrain(
-        &mut self,
-        f: Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>,
-    ) {
+    pub fn add_transition_constrain(&mut self, f: Constrain<F>) {
         self.transition_constrains.push(f);
     }
 
@@ -170,6 +169,10 @@ pub struct Constrains<F: PrimeField> {
 impl<F: PrimeField> Constrains<F> {
     pub fn len(&self) -> usize {
         self.constrains.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.constrains.len() == 0
     }
 
     pub fn get_constrain_poly(&self, col: usize) -> DensePolynomial<F> {

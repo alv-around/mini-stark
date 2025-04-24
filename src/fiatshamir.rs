@@ -55,7 +55,7 @@ where
             .challenge_scalars(1, "ZK: pick random shift of domain")
             .add_digest(1, "commit to quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
-            .challenge_bytes(8 * constrain_queries, "retrive random queries")
+            .challenge_scalars(constrain_queries, "number of queries in DEEP ALI")
             .add_fri(rounds, fri_queries)
     }
 }
@@ -97,16 +97,16 @@ where
         let mut this = self;
         for _ in 0..rounds - 1 {
             this = this
-                .add_digest(1, "add merkle commit: commit to fri round")
-                .challenge_scalars(1, "random scalar challenge: polynomial folding");
+                .challenge_scalars(1, "(DEEP) FRI: pick random z")
+                .add_scalars(2, "(DEEP) FRI: degree one B polynomial")
+                .challenge_scalars(1, "FRI COMMIT Phase: random scalar challenge")
+                .add_digest(1, "FRI COMMIT Phase: commit to folded codeword");
         }
 
-        this = this
-            .add_digest(1, "add merkle commit: commit to last fri round")
-            .challenge_bytes(
-                8 * queries,
-                "query phase: choose a random element in the domain",
-            );
+        this = this.challenge_bytes(
+            8 * queries,
+            "FRI QUERY Phase: choose a random element in the domain",
+        );
 
         this
     }
