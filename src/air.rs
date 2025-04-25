@@ -1,24 +1,24 @@
 use crate::util::is_power_of_two;
-use ark_ff::PrimeField;
+use ark_ff::FftField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::EvaluationDomain;
 use ark_std::test_rng;
 
-pub trait Provable<W, F: PrimeField> {
+pub trait Provable<W, F: FftField> {
     fn trace(&self, witness: &W) -> TraceTable<F>;
     // fn derive_constrians(&self) -> Constrains<F>;
 }
 
 // Matrix is the basic struct for the trace, and ldes
-pub(crate) struct Matrix<F: PrimeField> {
+pub(crate) struct Matrix<F: FftField> {
     length: usize,
     width: usize,
     data: Vec<F>,
 }
 
-impl<F: PrimeField> Matrix<F> {
+impl<F: FftField> Matrix<F> {
     pub(crate) fn new(length: usize, width: usize, entries: Option<Vec<F>>) -> Self {
         assert!(is_power_of_two(length));
         let data = match entries {
@@ -60,7 +60,7 @@ impl<F: PrimeField> Matrix<F> {
 
 type Constrain<F> = Box<dyn Fn(&Vec<DensePolynomial<F>>) -> DensePolynomial<F>>;
 
-pub struct TraceTable<F: PrimeField> {
+pub struct TraceTable<F: FftField> {
     pub(super) trace: Matrix<F>,
     steps: usize,
     domain: Radix2EvaluationDomain<F>,
@@ -69,7 +69,7 @@ pub struct TraceTable<F: PrimeField> {
     transition_constrains: Vec<Constrain<F>>,
 }
 
-impl<F: PrimeField> TraceTable<F> {
+impl<F: FftField> TraceTable<F> {
     pub fn new(steps: usize, registers: usize) -> Self {
         let domain = Radix2EvaluationDomain::<F>::new(steps + 1).unwrap();
         let omega = domain.group_gen();
@@ -160,13 +160,13 @@ impl<F: PrimeField> TraceTable<F> {
     }
 }
 
-pub struct Constrains<F: PrimeField> {
+pub struct Constrains<F: FftField> {
     trace_constrains_num: usize,
     transition_constrains_num: usize,
     constrains: Vec<DensePolynomial<F>>,
 }
 
-impl<F: PrimeField> Constrains<F> {
+impl<F: FftField> Constrains<F> {
     pub fn len(&self) -> usize {
         self.constrains.len()
     }

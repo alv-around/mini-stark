@@ -1,5 +1,5 @@
 use crate::{error::MerkleProofError, util::logarithm_of_two_k, Hash};
-use ark_ff::PrimeField;
+use ark_ff::FftField;
 use digest::Digest;
 use log::trace;
 use std::marker::PhantomData;
@@ -31,7 +31,7 @@ pub trait Tree {
 
 /// Configuration for a Merkle Tree specifying its structure
 #[derive(Clone)]
-pub struct MerkleTreeConfig<D: Digest, F: PrimeField> {
+pub struct MerkleTreeConfig<D: Digest, F: FftField> {
     /// Number of leaves grouped under each lowest-level inner node
     pub leafs_per_node: usize,
     /// Number of children for each inner node (except lowest level)
@@ -53,7 +53,7 @@ pub struct MerkleTreeConfig<D: Digest, F: PrimeField> {
 /// Level 0:  0 1 2 3  4 5 6 7  8 9 10 11 12 13 14 15
 /// (Input)
 #[derive(Clone)]
-pub struct MerkleTree<D: Digest, F: PrimeField> {
+pub struct MerkleTree<D: Digest, F: FftField> {
     /// Vector containing all leaf values
     leafs: Vec<F>,
     /// Vector containing all inner nodes (hashes)
@@ -64,7 +64,7 @@ pub struct MerkleTree<D: Digest, F: PrimeField> {
     levels: usize,
 }
 
-impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
+impl<D: Digest, F: FftField> Tree for MerkleTree<D, F> {
     type Input = F;
     type Inner = Hash<D>;
     type Config = MerkleTreeConfig<D, F>;
@@ -177,7 +177,7 @@ impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
     }
 }
 
-impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
+impl<F: FftField, D: Digest> MerkleTree<D, F> {
     /// Gets the index of a node's parent in the nodes vector
     ///
     /// # Arguments
@@ -290,7 +290,7 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
 
 /// Structure representing a Merkle proof
 #[derive(Clone, Debug)]
-pub struct MerklePath<D: Digest, F: PrimeField> {
+pub struct MerklePath<D: Digest, F: FftField> {
     /// Leaf values that share the same parent as the target leaf
     pub(super) leaf_neighbours: Vec<F>,
     /// Sibling groups at each level needed to reconstruct the root
@@ -309,7 +309,7 @@ impl<D: Digest> MerkleRoot<D> {
     ///
     /// # Returns
     /// true if the proof is valid, false otherwise
-    pub fn check_proof<F: PrimeField>(&self, proof: MerklePath<D, F>) -> bool {
+    pub fn check_proof<F: FftField>(&self, proof: MerklePath<D, F>) -> bool {
         // Start by hashing the leaf group
         let mut previous = MerkleTree::<D, F>::calculate_from_leafs(&proof.leaf_neighbours);
         trace!(

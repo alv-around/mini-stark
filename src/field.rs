@@ -1,6 +1,6 @@
 use ark_ff::fields::{Fp2, Fp2Config, MontFp};
 use ark_ff::fields::{MontBackend, MontConfig};
-use ark_ff::{FftField, Fp, PrimeField};
+use ark_ff::{FftField, Fp};
 
 #[derive(MontConfig)]
 #[modulus = "2013265921"]
@@ -30,7 +30,7 @@ impl Fp2Config for GoldilocksQuadraticExtensionConfig {
 
 // ---- Helper Trait ----
 pub trait ExtensionFieldBase {
-    type Base: PrimeField;
+    type Base: FftField;
 }
 
 impl<Config: Fp2Config> ExtensionFieldBase for Fp2<Config> {

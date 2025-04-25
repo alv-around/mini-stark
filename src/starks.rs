@@ -6,7 +6,7 @@ use crate::fri::{Fri, FriConfig, FriProof};
 use crate::merkle::{MerkleTree, MerkleTreeConfig, Tree};
 use crate::util::ceil_log2_k;
 use crate::Hash;
-use ark_ff::{PrimeField, Zero};
+use ark_ff::{FftField, PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
 use digest::core_api::BlockSizeUser;
@@ -17,7 +17,7 @@ use nimue::{Arthur, ByteWriter, DigestBridge, IOPattern};
 use std::iter::zip;
 use std::marker::PhantomData;
 
-pub struct StarkProof<D: Digest, F: PrimeField> {
+pub struct StarkProof<D: Digest, F: FftField> {
     arthur: Vec<u8>,
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
@@ -28,12 +28,12 @@ pub struct StarkProof<D: Digest, F: PrimeField> {
 
 pub struct Stark<D, F>(StarkConfig<D, F>)
 where
-    F: PrimeField,
+    F: FftField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone;
 
 impl<D, F> Stark<D, F>
 where
-    F: PrimeField,
+    F: FftField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
     pub fn new(config: StarkConfig<D, F>) -> Self {
@@ -226,7 +226,7 @@ where
 
 pub struct StarkConfig<D, F>
 where
-    F: PrimeField,
+    F: FftField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>:
         StarkIOPattern<D, F> + FriIOPattern<D, F> + FieldIOPattern<F> + DigestIOWritter<D>,
@@ -245,7 +245,7 @@ where
 
 impl<D, F> StarkConfig<D, F>
 where
-    F: PrimeField,
+    F: FftField + PrimeField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>:
         StarkIOPattern<D, F> + FriIOPattern<D, F> + FieldIOPattern<F> + DigestIOWritter<D>,

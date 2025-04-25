@@ -1,7 +1,7 @@
 use crate::error::{ProverError, VerifierError};
 use crate::fiatshamir::DigestReader;
 use crate::merkle::{MerklePath, MerkleRoot, MerkleTree, MerkleTreeConfig, Tree};
-use ark_ff::PrimeField;
+use ark_ff::FftField;
 use ark_poly::domain::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::EvaluationDomain;
@@ -15,25 +15,25 @@ use nimue::{Arthur, ByteChallenges, ByteWriter, DigestBridge, Merlin};
 use std::iter::zip;
 
 #[derive(Clone)]
-pub struct FriProof<D: Digest, F: PrimeField> {
+pub struct FriProof<D: Digest, F: FftField> {
     points: Vec<Vec<[(F, F); 3]>>,
     queries: Vec<Vec<[MerklePath<D, F>; 2]>>,
     quotients: Vec<Vec<Vec<F>>>,
 }
 
 #[derive(Clone)]
-pub struct FriConfig<D: Digest, F: PrimeField> {
+pub struct FriConfig<D: Digest, F: FftField> {
     pub(crate) queries: usize,
     pub(crate) merkle_config: MerkleTreeConfig<D, F>,
     pub(crate) blowup_factor: usize,
     pub(crate) rounds: usize,
 }
 
-pub struct Fri<D: Digest, F: PrimeField>(FriConfig<D, F>);
+pub struct Fri<D: Digest, F: FftField>(FriConfig<D, F>);
 
 impl<D, F> Fri<D, F>
 where
-    F: PrimeField,
+    F: FftField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
     pub fn new(config: FriConfig<D, F>) -> Self {
@@ -289,7 +289,7 @@ where
     }
 }
 
-pub(super) struct Transcript<D: Digest, F: PrimeField>(
+pub(super) struct Transcript<D: Digest, F: FftField>(
     Vec<MerkleRoot<D>>,      // round commits
     Vec<F>,                  // alphas
     Vec<usize>,              // betas
@@ -298,7 +298,7 @@ pub(super) struct Transcript<D: Digest, F: PrimeField>(
 );
 
 #[derive(Clone)]
-pub(super) struct FriRound<D: Digest, F: PrimeField> {
+pub(super) struct FriRound<D: Digest, F: FftField> {
     poly: DensePolynomial<F>,
     commit: MerkleTree<D, F>,
     domain: Radix2EvaluationDomain<F>,
@@ -309,7 +309,7 @@ pub(super) struct FriRound<D: Digest, F: PrimeField> {
 impl<D, F> FriRound<D, F>
 where
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    F: PrimeField,
+    F: FftField,
 {
     fn new(poly: DensePolynomial<F>, domain_size: usize, config: MerkleTreeConfig<D, F>) -> Self {
         let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
