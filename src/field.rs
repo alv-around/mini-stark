@@ -1,6 +1,6 @@
 use ark_ff::fields::{Fp2, Fp2Config, MontFp};
 use ark_ff::fields::{MontBackend, MontConfig};
-use ark_ff::{FftField, Fp, PrimeField, QuadExtConfig};
+use ark_ff::{FftField, Fp, PrimeField};
 
 #[derive(MontConfig)]
 #[modulus = "2013265921"]
@@ -28,13 +28,28 @@ impl Fp2Config for GoldilocksQuadraticExtensionConfig {
     ];
 }
 
-// TODO: change trait to FttField
-// TODO: implement STARKFIEL TRAIT in Proving System
-pub trait StarkField<F: PrimeField>
+// ---- Helper Trait ----
+pub trait ExtensionFieldBase {
+    type Base: PrimeField;
+}
+
+impl<Config: Fp2Config> ExtensionFieldBase for Fp2<Config> {
+    type Base = Config::Fp;
+}
+
+// ---- StarkField Trait ----
+pub trait StarkField<F: FftField>
 where
-    Self::BaseField: PrimeField,
-    Self::ExtensionField: QuadExtConfig,
+    Self::BaseField: FftField,
+    Self::ExtensionField: ExtensionFieldBase<Base = Self::BaseField>,
 {
     type BaseField;
     type ExtensionField;
+}
+
+struct GoldilocksStark;
+
+impl StarkField<Goldilocks> for GoldilocksStark {
+    type BaseField = Goldilocks;
+    type ExtensionField = GoldilocksQuadraticExtension;
 }
