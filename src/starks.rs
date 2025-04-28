@@ -181,7 +181,7 @@ where
 
     pub fn verify(
         &self,
-        constrains: Constrains<F>,
+        constrains: Constrains<F::Base>,
         proof: StarkProof<D, F>,
     ) -> Result<bool, VerifierError> {
         info!("Verification: start verification...");
@@ -197,17 +197,29 @@ where
         let mut arthur: Arthur<'_, DigestBridge<D>, u8> = self.0.io.to_arthur(&arthur);
         assert_eq!(arthur.next_digest()?, trace_commit);
 
-        let [_shift]: [F; 1] = arthur.challenge_scalars()?;
-        let domain = Radix2EvaluationDomain::<F>::new(self.0.degree + 1).unwrap();
+        let [_shift]: [F::Base; 1] = arthur.challenge_scalars()?;
+        let domain = Radix2EvaluationDomain::<F::Base>::new(self.0.degree + 1).unwrap();
         assert_eq!(arthur.next_digest()?, constrain_trace_commit);
 
-        let [r]: [F; 1] = arthur.challenge_scalars()?;
+        let [r]: [F::Base; 1] = arthur.challenge_scalars()?;
         debug!("Verification: 1. proof commits match transcript");
 
         // 2. build validity polynomial assert it matches the the query values provided in
         //    the proof
-        let mut queries = vec![F::ZERO; self.0.constrain_queries];
+        let mut queries = vec![
+            <F::Extension as ark_ff::Field>::BasePrimeField::zero();
+            self.0.constrain_queries
+                * (F::Extension::extension_degree() as usize)
+        ];
         arthur.fill_challenge_scalars(&mut queries)?;
+        let queries = queries
+            .chunks_exact(F::Extension::extension_degree() as usize)
+            .map(|a| {
+                let base_elements: Vec<<F::Extension as ark_ff::Field>::BasePrimeField> =
+                    a.iter().copied().collect();
+                F::Extension::from_base_prime_field_elems(base_elements).unwrap()
+            })
+            .collect::<Vec<F::Extension>>();
         debug!("Verification: 2.1 queries from transcript retrieved");
 
         // 2.2 assert that the queries provided from constrain trace match commit
@@ -219,7 +231,10 @@ where
             for (i, (constrain, constrain_eval)) in
                 zip(constrains.get_polynomials(), constrain_query).enumerate()
             {
-                assert_eq!(constrain.evaluate(&query), constrain_eval);
+                assert_eq!(
+                    evaluate_base_poly_on_extension_point::<F>(constrain.coeffs(), &query),
+                    constrain_eval
+                );
                 c_x = c_x
                     + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
             }
@@ -227,13 +242,13 @@ where
             let (rest, quotient) = c_x.divide_by_vanishing_poly(domain);
             assert_eq!(rest, DensePolynomial::zero());
 
-            let evaluation = quotient.evaluate(&query);
+            let evaluation = evaluate_base_poly_on_extension_point::<F>(quotient.coeffs(), &query);
             assert_eq!(evaluation, validity_query);
         }
         debug!("Verification: 2.2 linking between validity and constrain polynomials successfull");
 
         // 3. run fri
-        let fri_verifier = Fri::<D, F>::new(self.0.fri_config.clone());
+        let fri_verifier = Fri::<D, F::Base>::new(self.0.fri_config.clone());
         assert!(fri_verifier.verify(fri_proof, &mut arthur).unwrap());
         debug!("Verification: 3. FRI verification passed");
 
@@ -252,7 +267,6 @@ where
         + DigestIOWritter<D>,
 {
     #[allow(dead_code)]
-    field: Goldilocks,
     security_bits: usize,
     steps: usize,
     blowup_factor: usize,
@@ -285,7 +299,6 @@ where
         let rounds = ceil_log2_k((steps * blowup_factor) + 1, 2);
 
         Self {
-            field: Goldilocks::new(),
             security_bits,
             steps,
             blowup_factor,
@@ -328,7 +341,8 @@ where
             panic!("");
         }
         let log_steps = ceil_log2_k(steps, 2);
-        let linking_queries = security_bits.div_ceil(F::MODULUS_BIT_SIZE as usize - log_steps);
+        let linking_queries =
+            security_bits.div_ceil(F::Base::MODULUS_BIT_SIZE as usize - log_steps);
 
         let rounds = ceil_log2_k(steps * blowup_factor, 2);
         let rho = 1f64 / blowup_factor as f64;
@@ -343,7 +357,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::field::Goldilocks;
+    use crate::field::GoldilocksFp;
     use sha2::Sha256;
 
     #[test]
@@ -357,7 +371,7 @@ mod test {
     fn test_stark_config_query_numbers() {
         let blowup_factor = 4;
         let steps = 129;
-        assert_eq!(Goldilocks::MODULUS_BIT_SIZE, 64);
+        assert_eq!(GoldilocksFp::MODULUS_BIT_SIZE, 64);
 
         // test query_number is at least 1
         let (constrain_queries, fri_queries) =

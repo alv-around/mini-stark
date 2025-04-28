@@ -47,6 +47,7 @@ pub fn ceil_log2_k(number: usize, base: usize) -> usize {
     }
 }
 
+// TODO: move function to trait method
 pub fn evaluate_base_poly_on_extension_point<F: StarkField>(
     coefficients: &[F::Base],
     point: &F::Extension,
@@ -61,7 +62,7 @@ pub fn evaluate_base_poly_on_extension_point<F: StarkField>(
     let polynomial = DensePolynomial::from_coefficients_slice(&extension_coefficients);
 
     // Now evaluate the polynomial at the extension field point
-    polynomial.evaluate(&point)
+    polynomial.evaluate(point)
 }
 
 #[cfg(test)]

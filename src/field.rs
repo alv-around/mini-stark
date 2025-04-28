@@ -43,34 +43,12 @@ pub trait StarkField {
                 > 100
         );
     }
-
-    // fn from_base_prime_field_elems(
-    //     elems: impl IntoIterator<Item = Self::Base>,
-    // ) -> Option<Self::Extension>;
 }
 
 // Goldilocks implementation
-pub struct Goldilocks {
-    base: PhantomData<GoldilocksFp>,
-    pub(crate) extension: PhantomData<QuadExtField<GoldilocksQuadraticExtension>>,
-}
-
-impl Goldilocks {
-    pub fn new() -> Self {
-        Self {
-            base: PhantomData::<GoldilocksFp>,
-            extension: PhantomData::<QuadExtField<GoldilocksQuadraticExtension>>,
-        }
-    }
-}
+pub struct Goldilocks;
 
 impl StarkField for Goldilocks {
     type Base = GoldilocksFp;
     type Extension = QuadExtField<GoldilocksQuadraticExtension>;
-
-    // fn from_base_prime_field_elems(
-    //     elems: impl IntoIterator<Item = Self::Base>,
-    // ) -> Option<Self::Extension> {
-    //     QuadExtField::<Self::Extension>::from_base_prime_field_elems(elems)
-    // }
 }
