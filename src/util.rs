@@ -1,4 +1,4 @@
-use ark_ff::{Field, PrimeField};
+use ark_ff::Field;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial};
 use core::ops::{BitAnd, Sub};
 use num_traits::{One, Zero};

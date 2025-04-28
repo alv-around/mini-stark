@@ -1,7 +1,6 @@
 use ark_ff::fields::{Fp2Config, MontFp};
 use ark_ff::fields::{MontBackend, MontConfig};
 use ark_ff::{FftField, Field, Fp, Fp2ConfigWrapper, PrimeField, QuadExtField};
-use std::marker::PhantomData;
 
 #[derive(MontConfig)]
 #[modulus = "2013265921"]
@@ -16,7 +15,8 @@ pub struct GoldilocksConfig;
 pub type GoldilocksFp = Fp<MontBackend<GoldilocksConfig, 1>, 1>;
 
 // field extension implementation taken from: https://github.com/WizardOfMenlo/whir/blob/main/src/crypto/fields.rs
-pub type GoldilocksQuadraticExtension = Fp2ConfigWrapper<GoldilocksFp2Config>;
+pub type GoldilocksFp2 = QuadExtField<GoldilocksQuadraticExtensionConfig>;
+pub type GoldilocksQuadraticExtensionConfig = Fp2ConfigWrapper<GoldilocksFp2Config>;
 pub struct GoldilocksFp2Config;
 impl Fp2Config for GoldilocksFp2Config {
     type Fp = GoldilocksFp;
@@ -50,5 +50,5 @@ pub struct Goldilocks;
 
 impl StarkField for Goldilocks {
     type Base = GoldilocksFp;
-    type Extension = QuadExtField<GoldilocksQuadraticExtension>;
+    type Extension = GoldilocksFp2;
 }

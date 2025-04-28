@@ -380,7 +380,7 @@ where
 mod test {
     use super::*;
     use crate::fiatshamir::FriIOPattern;
-    use crate::field::Goldilocks;
+    use crate::field::{GoldilocksFp, GoldilocksFp2};
     use crate::merkle::MerkleTreeConfig;
     use ark_poly::univariate::DensePolynomial;
     use ark_poly::DenseUVPolynomial;
@@ -395,19 +395,19 @@ mod test {
 
     #[test]
     fn test_fri_prover_new() {
-        let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
+        let coeffs = (0..4).map(GoldilocksFp::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let queries = 3;
         let rounds = 3;
         let io: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", 3, queries);
+            FriIOPattern::<_, GoldilocksFp>::new_fri::<GoldilocksFp2>("🍟", 3, queries);
         let mut transcript = io.to_merlin();
 
         let merkle_config = MerkleTreeConfig {
             leafs_per_node: 2,
             inner_children: 2,
             _digest: PhantomData::<Sha256>,
-            _field: PhantomData::<Goldilocks>,
+            _field: PhantomData::<GoldilocksFp>,
         };
 
         let config = FriConfig {
@@ -425,19 +425,19 @@ mod test {
 
     #[test_log::test]
     fn test_fri_new() {
-        let coeffs = (0..4).map(Goldilocks::from).collect::<Vec<_>>();
+        let coeffs = (0..4).map(GoldilocksFp::from).collect::<Vec<_>>();
         let poly = DensePolynomial::from_coefficients_vec(coeffs);
         let queries = 1;
         let rounds = 3;
         let io: IOPattern<DigestBridge<Sha256>> =
-            FriIOPattern::<_, Goldilocks>::new_fri("🍟", rounds, 2);
+            FriIOPattern::<_, GoldilocksFp>::new_fri::<GoldilocksFp2>("🍟", rounds, 2);
         let mut transcript = io.to_merlin();
 
         let merkle_config = MerkleTreeConfig {
             leafs_per_node: 2,
             inner_children: 2,
             _digest: PhantomData::<Sha256>,
-            _field: PhantomData::<Goldilocks>,
+            _field: PhantomData::<GoldilocksFp>,
         };
 
         let config = FriConfig {

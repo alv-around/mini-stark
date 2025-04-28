@@ -188,22 +188,22 @@ impl<F: FftField> Constrains<F> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::field::Goldilocks;
+    use crate::field::GoldilocksFp;
     use ark_ff::{AdditiveGroup, Field};
     use ark_poly::Polynomial;
 
-    const ONE: Goldilocks = Goldilocks::ONE;
-    const ZERO: Goldilocks = Goldilocks::ZERO;
+    const ONE: GoldilocksFp = GoldilocksFp::ONE;
+    const ZERO: GoldilocksFp = GoldilocksFp::ZERO;
 
     struct FibonacciClaim {
         step: usize, // nth fibonacci number
-        output: Goldilocks,
+        output: GoldilocksFp,
     }
 
     struct Witness;
 
-    impl Provable<Witness, Goldilocks> for FibonacciClaim {
-        fn trace(&self, _witness: &Witness) -> TraceTable<Goldilocks> {
+    impl Provable<Witness, GoldilocksFp> for FibonacciClaim {
+        fn trace(&self, _witness: &Witness) -> TraceTable<GoldilocksFp> {
             let trace_width = 2usize;
             let mut trace = TraceTable::new(self.step, trace_width);
 
@@ -245,7 +245,7 @@ mod test {
     fn test_air_trace() {
         let third_fibonacci = FibonacciClaim {
             step: 3,
-            output: Goldilocks::from(3),
+            output: GoldilocksFp::from(3),
         };
         let trace = third_fibonacci.trace(&Witness);
         assert_eq!(trace.trace.length, 4);
@@ -262,12 +262,12 @@ mod test {
         );
         assert_ne!(
             *trace.trace.get_value(third_fibonacci.step, 0),
-            Goldilocks::ZERO
+            GoldilocksFp::ZERO
         );
 
         let fourth_fib = FibonacciClaim {
             step: 4,
-            output: Goldilocks::from(5),
+            output: GoldilocksFp::from(5),
         };
         let trace = fourth_fib.trace(&Witness);
         assert_eq!(trace.trace.length, 8);
@@ -281,11 +281,14 @@ mod test {
             *trace.trace.get_value(fourth_fib.step, 0),
             fourth_fib.output
         );
-        assert_ne!(*trace.trace.get_value(fourth_fib.step, 0), Goldilocks::ZERO);
+        assert_ne!(
+            *trace.trace.get_value(fourth_fib.step, 0),
+            GoldilocksFp::ZERO
+        );
 
         let fith_fib = FibonacciClaim {
             step: 5,
-            output: Goldilocks::from(8),
+            output: GoldilocksFp::from(8),
         };
         let trace = fith_fib.trace(&Witness);
         assert_eq!(trace.trace.length, 8);
@@ -296,18 +299,18 @@ mod test {
             fith_fib.output
         );
         assert_ne!(*trace.trace.get_value(fith_fib.step, 0), fith_fib.output);
-        assert_ne!(*trace.trace.get_value(fith_fib.step, 0), Goldilocks::ZERO);
+        assert_ne!(*trace.trace.get_value(fith_fib.step, 0), GoldilocksFp::ZERO);
     }
 
     #[test]
     fn test_air_trace_polynomials() {
         let claim = FibonacciClaim {
             step: 3,
-            output: Goldilocks::from(3),
+            output: GoldilocksFp::from(3),
         };
         let trace = claim.trace(&Witness);
         let trace_polys = trace.get_trace_polys();
-        let domain = Radix2EvaluationDomain::<Goldilocks>::new(trace.trace.length).unwrap();
+        let domain = Radix2EvaluationDomain::<GoldilocksFp>::new(trace.trace.length).unwrap();
 
         // check trace polynomials are computed correctly
         for i in 0..claim.step {
@@ -321,7 +324,7 @@ mod test {
     fn test_air_constrains() {
         let claim = FibonacciClaim {
             step: 3,
-            output: Goldilocks::from(3),
+            output: GoldilocksFp::from(3),
         };
         let trace = claim.trace(&Witness);
         let domain = trace.domain;
