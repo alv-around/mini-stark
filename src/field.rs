@@ -1,6 +1,7 @@
 use ark_ff::fields::{Fp2Config, MontFp};
 use ark_ff::fields::{MontBackend, MontConfig};
-use ark_ff::{FftField, Fp, Fp2ConfigWrapper, PrimeField, QuadExtConfig};
+use ark_ff::{FftField, Field, Fp, Fp2ConfigWrapper, PrimeField, QuadExtField};
+use std::marker::PhantomData;
 
 #[derive(MontConfig)]
 #[modulus = "2013265921"]
@@ -27,26 +28,49 @@ impl Fp2Config for GoldilocksFp2Config {
         MontFp!("18446744069414584320"),
     ];
 }
+
 // ========== Stark Field Config ==========
 pub trait StarkField {
     type Base: PrimeField + FftField;
-    type Extension: QuadExtConfig;
+    type Extension: Field<BasePrimeField = Self::Base>;
 
     // Compile-time safety check
     fn SOUNDNESS_CHECK(&self) {
         // Verify extension field size > 2^100 (Goldilocks² has 128-bit modulus)
         assert!(
-            <Self::Base as PrimeField>::MODULUS_BIT_SIZE as usize
-                * <Self::Extension as QuadExtConfig>::DEGREE_OVER_BASE_PRIME_FIELD
+            <Self::Base as PrimeField>::MODULUS_BIT_SIZE as u64
+                * <Self::Extension as Field>::extension_degree()
                 > 100
         );
     }
+
+    // fn from_base_prime_field_elems(
+    //     elems: impl IntoIterator<Item = Self::Base>,
+    // ) -> Option<Self::Extension>;
 }
 
 // Goldilocks implementation
-pub struct Goldilocks;
+pub struct Goldilocks {
+    base: PhantomData<GoldilocksFp>,
+    pub(crate) extension: PhantomData<QuadExtField<GoldilocksQuadraticExtension>>,
+}
+
+impl Goldilocks {
+    pub fn new() -> Self {
+        Self {
+            base: PhantomData::<GoldilocksFp>,
+            extension: PhantomData::<QuadExtField<GoldilocksQuadraticExtension>>,
+        }
+    }
+}
 
 impl StarkField for Goldilocks {
     type Base = GoldilocksFp;
-    type Extension = GoldilocksQuadraticExtension;
+    type Extension = QuadExtField<GoldilocksQuadraticExtension>;
+
+    // fn from_base_prime_field_elems(
+    //     elems: impl IntoIterator<Item = Self::Base>,
+    // ) -> Option<Self::Extension> {
+    //     QuadExtField::<Self::Extension>::from_base_prime_field_elems(elems)
+    // }
 }

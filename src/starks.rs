@@ -2,11 +2,12 @@ use crate::air::{Constrains, Matrix, Provable};
 use crate::error::{ProverError, VerifierError};
 use crate::fiatshamir::{DigestIOWritter, StarkIOPattern};
 use crate::fiatshamir::{DigestReader, FriIOPattern};
+use crate::field::{Goldilocks, StarkField};
 use crate::fri::{Fri, FriConfig, FriProof};
 use crate::merkle::{MerkleTree, MerkleTreeConfig, Tree};
-use crate::util::ceil_log2_k;
+use crate::util::{ceil_log2_k, evaluate_base_poly_on_extension_point};
 use crate::Hash;
-use ark_ff::{FftField, PrimeField, Zero};
+use ark_ff::{Field, PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
 use digest::core_api::BlockSizeUser;
@@ -14,26 +15,27 @@ use digest::{Digest, FixedOutputReset};
 use log::{debug, error, info};
 use nimue::plugins::ark::{FieldChallenges, FieldIOPattern};
 use nimue::{Arthur, ByteWriter, DigestBridge, IOPattern};
+use num_traits::zero;
 use std::iter::zip;
 use std::marker::PhantomData;
 
-pub struct StarkProof<D: Digest, F: FftField> {
+pub struct StarkProof<D: Digest, F: StarkField> {
     arthur: Vec<u8>,
     trace_commit: Hash<D>,
     constrain_trace_commit: Hash<D>,
-    constrain_queries: Vec<Vec<F>>,
-    validity_queries: Vec<F>,
-    fri_proof: FriProof<D, F>,
+    constrain_queries: Vec<Vec<F::Extension>>,
+    validity_queries: Vec<F::Extension>,
+    fri_proof: FriProof<D, F::Base>,
 }
 
 pub struct Stark<D, F>(StarkConfig<D, F>)
 where
-    F: FftField,
+    F: StarkField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone;
 
 impl<D, F> Stark<D, F>
 where
-    F: FftField,
+    F: StarkField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
 {
     pub fn new(config: StarkConfig<D, F>) -> Self {
@@ -55,7 +57,7 @@ where
         Self(config)
     }
 
-    pub fn prove<T, AIR: Provable<T, F>>(
+    pub fn prove<T, AIR: Provable<T, F::Base>>(
         &self,
         air: AIR,
         witness: T,
@@ -67,7 +69,7 @@ where
         let trace = air.trace(&witness);
         let trace_domain = trace.get_domain();
         let trace_codeword =
-            MerkleTree::<D, F>::new(trace.trace.get_data(), self.0.merkle_config.clone());
+            MerkleTree::<D, F::Base>::new(trace.trace.get_data(), self.0.merkle_config.clone());
         let trace_commit = trace_codeword.root();
         merlin.add_bytes(&trace_commit)?;
         debug!(
@@ -77,19 +79,19 @@ where
 
         // 1.2 calculate low degree extension of the original trace
         let lde_domain_size = self.0.blowup_factor * trace_domain.size();
-        let [random_shift]: [F; 1] = merlin.challenge_scalars()?;
+        let [random_shift]: [F::Base; 1] = merlin.challenge_scalars()?;
         let lde_domain = Radix2EvaluationDomain::new(lde_domain_size)
             .unwrap()
             .get_coset(random_shift)
             .unwrap();
         let constrains = trace.derive_constrains();
-        let mut constrain_trace = Matrix::<F>::new(lde_domain_size, constrains.len(), None);
+        let mut constrain_trace = Matrix::<F::Base>::new(lde_domain_size, constrains.len(), None);
         for (i, poly) in constrains.get_polynomials().into_iter().enumerate() {
             let evals = poly.evaluate_over_domain(lde_domain);
             constrain_trace.add_col(i, evals.evals);
         }
         let constrain_trace_codeword =
-            MerkleTree::<D, F>::new(constrain_trace.get_data(), self.0.merkle_config.clone());
+            MerkleTree::<D, F::Base>::new(constrain_trace.get_data(), self.0.merkle_config.clone());
         let constrain_trace_commit = constrain_trace_codeword.root();
         merlin.add_bytes(&constrain_trace_commit)?;
         debug!(
@@ -104,13 +106,14 @@ where
         );
 
         // 1.3 mix constrains polynomial into the validity polynomial
-        let r: [F; 1] = merlin.challenge_scalars()?;
+        let [r]: [F::Base; 1] = merlin.challenge_scalars()?;
         debug!("random variable for mixing r: {:?}", r);
-        let mut mixed_constrain_poly = DensePolynomial::<_>::from_coefficients_vec(vec![F::ZERO]);
+        let mut mixed_constrain_poly =
+            DensePolynomial::<_>::from_coefficients_vec(vec![F::Base::zero()]);
         // parametric batching g = f_0 + r f_1 + r^2 f_2 + .. + r^(n-1) f_{n-1}
         for (i, constrain_poly) in constrains.get_polynomials().iter().enumerate() {
             mixed_constrain_poly = mixed_constrain_poly
-                + DensePolynomial::<_>::from_coefficients_vec(vec![r[0].pow([i as u64])])
+                + DensePolynomial::<F::Base>::from_coefficients_vec(vec![r.pow([i as u64])])
                     * constrain_poly;
         }
         let (rest, validity_poly) = mixed_constrain_poly.divide_by_vanishing_poly(trace_domain);
@@ -119,8 +122,20 @@ where
 
         // 2. DEEP-ALI: receive random queries from verifier and prove the queries correspond to the
         //    previous work.
-        let mut queries = vec![F::ZERO; self.0.constrain_queries];
+        let mut queries = vec![
+            <F::Extension as ark_ff::Field>::BasePrimeField::zero();
+            self.0.constrain_queries
+                * (F::Extension::extension_degree() as usize)
+        ];
         merlin.fill_challenge_scalars(&mut queries)?;
+        let queries = queries
+            .chunks_exact(F::Extension::extension_degree() as usize)
+            .map(|a| {
+                let base_elements: Vec<<F::Extension as ark_ff::Field>::BasePrimeField> =
+                    a.iter().copied().collect();
+                F::Extension::from_base_prime_field_elems(base_elements).unwrap()
+            })
+            .collect::<Vec<F::Extension>>();
         debug!(
             "Proving: 2. draw {} trace queries",
             self.0.constrain_queries
@@ -131,15 +146,18 @@ where
         let mut validity_queries = Vec::new();
         for query in queries.into_iter() {
             // constrain queries
-            let constrain_query: Vec<F> = constrains
+            let constrain_query: Vec<F::Extension> = constrains
                 .get_polynomials()
                 .iter()
-                .map(|constrain| constrain.evaluate(&query))
+                .map(|constrain| {
+                    evaluate_base_poly_on_extension_point::<F>(constrain.coeffs(), &query)
+                })
                 .collect();
             constrain_queries.push(constrain_query);
 
             // validity query
-            let validity_query = validity_poly.evaluate(&query);
+            let validity_query =
+                evaluate_base_poly_on_extension_point::<F>(validity_poly.coeffs(), &query);
             validity_queries.push(validity_query);
         }
         debug!("Proving: 2.1 queries to committed traces provided");
@@ -226,29 +244,34 @@ where
 
 pub struct StarkConfig<D, F>
 where
-    F: FftField,
+    F: StarkField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    IOPattern<DigestBridge<D>>:
-        StarkIOPattern<D, F> + FriIOPattern<D, F> + FieldIOPattern<F> + DigestIOWritter<D>,
+    IOPattern<DigestBridge<D>>: StarkIOPattern<D, F>
+        + FriIOPattern<D, F::Base>
+        + FieldIOPattern<F::Base>
+        + DigestIOWritter<D>,
 {
     #[allow(dead_code)]
+    field: Goldilocks,
     security_bits: usize,
     steps: usize,
     blowup_factor: usize,
     rounds: usize,
     constrain_queries: usize,
     degree: usize,
-    fri_config: FriConfig<D, F>,
-    merkle_config: MerkleTreeConfig<D, F>,
+    fri_config: FriConfig<D, F::Base>,
+    merkle_config: MerkleTreeConfig<D, F::Base>,
     io: IOPattern<DigestBridge<D>>,
 }
 
 impl<D, F> StarkConfig<D, F>
 where
-    F: FftField + PrimeField,
+    F: StarkField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    IOPattern<DigestBridge<D>>:
-        StarkIOPattern<D, F> + FriIOPattern<D, F> + FieldIOPattern<F> + DigestIOWritter<D>,
+    IOPattern<DigestBridge<D>>: StarkIOPattern<D, F>
+        + FriIOPattern<D, F::Base>
+        + FieldIOPattern<F::Base>
+        + DigestIOWritter<D>,
 {
     pub fn new(
         security_bits: usize,
@@ -262,6 +285,7 @@ where
         let rounds = ceil_log2_k((steps * blowup_factor) + 1, 2);
 
         Self {
+            field: Goldilocks::new(),
             security_bits,
             steps,
             blowup_factor,
@@ -276,14 +300,14 @@ where
                     leafs_per_node: 2,
                     inner_children: 2,
                     _digest: PhantomData::<D>,
-                    _field: PhantomData::<F>,
+                    _field: PhantomData::<F::Base>,
                 },
             },
             merkle_config: MerkleTreeConfig {
                 leafs_per_node: trace_columns,
                 inner_children: 2,
                 _digest: PhantomData::<D>,
-                _field: PhantomData::<F>,
+                _field: PhantomData::<F::Base>,
             },
             io: <IOPattern<DigestBridge<D>> as StarkIOPattern<D, F>>::new_stark(
                 rounds,
