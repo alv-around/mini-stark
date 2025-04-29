@@ -1,24 +1,24 @@
 use ark_ff::{AdditiveGroup, Field};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Polynomial};
 use mini_starks::air::{Provable, TraceTable};
-use mini_starks::field::Goldilocks;
+use mini_starks::field::{Goldilocks, GoldilocksFp};
 use mini_starks::starks::{Stark, StarkConfig};
 use sha2::Sha256;
 
-const ONE: Goldilocks = Goldilocks::ONE;
-const ZERO: Goldilocks = Goldilocks::ZERO;
+const ONE: GoldilocksFp = GoldilocksFp::ONE;
+const ZERO: GoldilocksFp = GoldilocksFp::ZERO;
 
 struct FibonacciClaim {
     step: usize, // nth fibonacci number
-    output: Goldilocks,
+    output: GoldilocksFp,
 }
 
 struct Witness {
-    secret_b: Goldilocks,
+    secret_b: GoldilocksFp,
 }
 
-impl Provable<Witness, Goldilocks> for FibonacciClaim {
-    fn trace(&self, witness: &Witness) -> TraceTable<Goldilocks> {
+impl Provable<Witness, GoldilocksFp> for FibonacciClaim {
+    fn trace(&self, witness: &Witness) -> TraceTable<GoldilocksFp> {
         let trace_width = 3usize;
         let mut trace = TraceTable::new(self.step, trace_width);
 
@@ -64,12 +64,12 @@ impl Provable<Witness, Goldilocks> for FibonacciClaim {
 
 fn test_setup() -> (Witness, FibonacciClaim) {
     let witness = Witness {
-        secret_b: Goldilocks::from(2),
+        secret_b: GoldilocksFp::from(2),
     };
     let claim = FibonacciClaim {
         step: 9,
         // FIXME: output should be used in the proof
-        output: Goldilocks::from(13),
+        output: GoldilocksFp::from(13),
     };
     (witness, claim)
 }
