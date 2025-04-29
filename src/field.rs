@@ -5,8 +5,8 @@ use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 
 // ========== Stark Field Config ==========
 pub trait StarkField {
-    type Base: PrimeField + FftField;
-    type Extension: Field<BasePrimeField = Self::Base> + Clone;
+    type Base: PrimeField;
+    type Extension: Field<BasePrimeField = Self::Base> + Clone + FftField;
 
     // Compile-time safety check
     fn SOUNDNESS_CHECK(&self) {

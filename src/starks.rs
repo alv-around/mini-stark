@@ -2,10 +2,10 @@ use crate::air::{Constrains, Matrix, Provable};
 use crate::error::{ProverError, VerifierError};
 use crate::fiatshamir::{DigestIOWritter, StarkIOPattern};
 use crate::fiatshamir::{DigestReader, FriIOPattern};
-use crate::field::{Goldilocks, StarkField};
+use crate::field::StarkField;
 use crate::fri::{Fri, FriConfig, FriProof};
 use crate::merkle::{MerkleTree, MerkleTreeConfig, Tree};
-use crate::util::{ceil_log2_k, evaluate_base_poly_on_extension_point};
+use crate::util::ceil_log2_k;
 use crate::Hash;
 use ark_ff::{Field, PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
@@ -15,7 +15,6 @@ use digest::{Digest, FixedOutputReset};
 use log::{debug, error, info};
 use nimue::plugins::ark::{FieldChallenges, FieldIOPattern};
 use nimue::{Arthur, ByteWriter, DigestBridge, IOPattern};
-use num_traits::zero;
 use std::iter::zip;
 use std::marker::PhantomData;
 
@@ -25,7 +24,7 @@ pub struct StarkProof<D: Digest, F: StarkField> {
     constrain_trace_commit: Hash<D>,
     constrain_queries: Vec<Vec<F::Extension>>,
     validity_queries: Vec<F::Extension>,
-    fri_proof: FriProof<D, F::Base>,
+    fri_proof: FriProof<D, F::Extension>,
 }
 
 pub struct Stark<D, F>(StarkConfig<D, F>)
@@ -132,7 +131,7 @@ where
             .chunks_exact(F::Extension::extension_degree() as usize)
             .map(|a| {
                 let base_elements: Vec<<F::Extension as ark_ff::Field>::BasePrimeField> =
-                    a.iter().copied().collect();
+                    a.to_vec();
                 F::Extension::from_base_prime_field_elems(base_elements).unwrap()
             })
             .collect::<Vec<F::Extension>>();
@@ -142,29 +141,31 @@ where
         );
 
         // 2.1 Link the committed constrain trace to the validity trace
+        let extension_validity_poly = F::extend_poly(&validity_poly);
+        let extension_constrain_polys: Vec<DensePolynomial<F::Extension>> = constrains
+            .get_polynomials()
+            .iter()
+            .map(|poly| F::extend_poly(poly))
+            .collect();
         let mut constrain_queries = Vec::new();
         let mut validity_queries = Vec::new();
         for query in queries.into_iter() {
             // constrain queries
-            let constrain_query: Vec<F::Extension> = constrains
-                .get_polynomials()
+            let constrain_query: Vec<F::Extension> = extension_constrain_polys
                 .iter()
-                .map(|constrain| {
-                    evaluate_base_poly_on_extension_point::<F>(constrain.coeffs(), &query)
-                })
+                .map(|ext_poly| ext_poly.evaluate(&query))
                 .collect();
             constrain_queries.push(constrain_query);
 
             // validity query
-            let validity_query =
-                evaluate_base_poly_on_extension_point::<F>(validity_poly.coeffs(), &query);
+            let validity_query = extension_validity_poly.evaluate(&query);
             validity_queries.push(validity_query);
         }
         debug!("Proving: 2.1 queries to committed traces provided");
 
         // 3. DEEP-IOPP: Make the low degree test FRI on the validity polynomial
-        let fri = Fri::<D, _>::new(self.0.fri_config.clone());
-        let (fri_proof, _) = fri.prove(&mut merlin, validity_poly)?;
+        let fri = Fri::<D, F::Extension>::new(self.0.fri_config.clone());
+        let (fri_proof, _) = fri.prove(&mut merlin, extension_validity_poly)?;
         debug!("Proving: 3 FRI test proved");
 
         info!("Proving: Finished successfully!");
@@ -198,7 +199,7 @@ where
         assert_eq!(arthur.next_digest()?, trace_commit);
 
         let [_shift]: [F::Base; 1] = arthur.challenge_scalars()?;
-        let domain = Radix2EvaluationDomain::<F::Base>::new(self.0.degree + 1).unwrap();
+        let domain = Radix2EvaluationDomain::<F::Extension>::new(self.0.degree + 1).unwrap();
         assert_eq!(arthur.next_digest()?, constrain_trace_commit);
 
         let [r]: [F::Base; 1] = arthur.challenge_scalars()?;
@@ -216,7 +217,7 @@ where
             .chunks_exact(F::Extension::extension_degree() as usize)
             .map(|a| {
                 let base_elements: Vec<<F::Extension as ark_ff::Field>::BasePrimeField> =
-                    a.iter().copied().collect();
+                    a.to_vec();
                 F::Extension::from_base_prime_field_elems(base_elements).unwrap()
             })
             .collect::<Vec<F::Extension>>();
@@ -224,31 +225,32 @@ where
 
         // 2.2 assert that the queries provided from constrain trace match commit
         // build with this queries the validity polynomial
+        let extension_constrains: Vec<DensePolynomial<F::Extension>> = constrains
+            .get_polynomials()
+            .iter()
+            .map(|constrain| F::extend_poly(constrain))
+            .collect();
         for (query, (constrain_query, validity_query)) in
             zip(queries, zip(constrain_queries, validity_queries))
         {
             let mut c_x = DensePolynomial::zero();
             for (i, (constrain, constrain_eval)) in
-                zip(constrains.get_polynomials(), constrain_query).enumerate()
+                zip(extension_constrains.clone(), constrain_query).enumerate()
             {
-                assert_eq!(
-                    evaluate_base_poly_on_extension_point::<F>(constrain.coeffs(), &query),
-                    constrain_eval
-                );
-                c_x = c_x
-                    + DensePolynomial::from_coefficients_vec(vec![r.pow([i as u64])]) * constrain;
+                assert_eq!(constrain.evaluate(&query), constrain_eval);
+                c_x = c_x + constrain * F::Extension::from_base_prime_field(r.pow([i as u64]));
             }
 
             let (rest, quotient) = c_x.divide_by_vanishing_poly(domain);
             assert_eq!(rest, DensePolynomial::zero());
 
-            let evaluation = evaluate_base_poly_on_extension_point::<F>(quotient.coeffs(), &query);
+            let evaluation = quotient.evaluate(&query);
             assert_eq!(evaluation, validity_query);
         }
         debug!("Verification: 2.2 linking between validity and constrain polynomials successfull");
 
         // 3. run fri
-        let fri_verifier = Fri::<D, F::Base>::new(self.0.fri_config.clone());
+        let fri_verifier = Fri::<D, F::Extension>::new(self.0.fri_config.clone());
         assert!(fri_verifier.verify(fri_proof, &mut arthur).unwrap());
         debug!("Verification: 3. FRI verification passed");
 
@@ -273,7 +275,7 @@ where
     rounds: usize,
     constrain_queries: usize,
     degree: usize,
-    fri_config: FriConfig<D, F::Base>,
+    fri_config: FriConfig<D, F::Extension>,
     merkle_config: MerkleTreeConfig<D, F::Base>,
     io: IOPattern<DigestBridge<D>>,
 }
@@ -313,7 +315,7 @@ where
                     leafs_per_node: 2,
                     inner_children: 2,
                     _digest: PhantomData::<D>,
-                    _field: PhantomData::<F::Base>,
+                    _field: PhantomData::<F::Extension>,
                 },
             },
             merkle_config: MerkleTreeConfig {
@@ -357,7 +359,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::field::GoldilocksFp;
+    use crate::field::{Goldilocks, GoldilocksFp};
     use sha2::Sha256;
 
     #[test]

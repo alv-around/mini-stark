@@ -1,6 +1,6 @@
 use crate::field::StarkField;
 use crate::Hash;
-use ark_ff::{Field, PrimeField};
+use ark_ff::{FftField, Field};
 use digest::core_api::BlockSizeUser;
 use digest::{generic_array::GenericArray, Digest, FixedOutputReset, OutputSizeUser};
 use nimue::{
@@ -43,7 +43,7 @@ impl<D, F> StarkIOPattern<D, F> for IOPattern<DigestBridge<D>>
 where
     F: StarkField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    Self: FieldIOPattern<F::Base> + DigestIOWritter<D> + FriIOPattern<D, F::Base>,
+    Self: FieldIOPattern<F::Base> + DigestIOWritter<D> + FriIOPattern<D, F::Extension>,
 {
     fn new_stark(
         rounds: usize,
@@ -60,7 +60,7 @@ where
                 constrain_queries * (F::Extension::extension_degree() as usize),
                 "number of queries in DEEP ALI",
             )
-            .add_fri::<F::Extension>(rounds, fri_queries)
+            .add_fri(rounds, fri_queries)
     }
 }
 
@@ -83,25 +83,25 @@ impl<H: DuplexHash> UsizeReader for Arthur<'_, H, u8> {
 }
 
 pub trait FriIOPattern<D: Digest, F: Field> {
-    fn new_fri<EF: Field>(domsep: &str, rounds: usize, queries: usize) -> Self;
-    fn add_fri<EF: Field>(self, rounds: usize, queries: usize) -> Self;
+    fn new_fri(domsep: &str, rounds: usize, queries: usize) -> Self;
+    fn add_fri(self, rounds: usize, queries: usize) -> Self;
 }
 
-impl<D, BF> FriIOPattern<D, BF> for IOPattern<DigestBridge<D>>
+impl<D, F> FriIOPattern<D, F> for IOPattern<DigestBridge<D>>
 where
-    BF: PrimeField,
+    F: FftField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    IOPattern<DigestBridge<D>>: FieldIOPattern<BF> + DigestIOWritter<D>,
+    IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D>,
 {
-    fn new_fri<EF: Field>(domsep: &str, rounds: usize, queries: usize) -> Self {
-        IOPattern::new(domsep).add_fri::<EF>(rounds, queries)
+    fn new_fri(domsep: &str, rounds: usize, queries: usize) -> Self {
+        IOPattern::new(domsep).add_fri(rounds, queries)
     }
 
-    fn add_fri<EF: Field>(self, rounds: usize, queries: usize) -> Self {
+    fn add_fri(self, rounds: usize, queries: usize) -> Self {
         let mut this = self;
         for _ in 0..rounds - 1 {
             this = this
-                .challenge_scalars(EF::extension_degree() as usize, "(DEEP) FRI: pick random z")
+                .challenge_scalars(1, "(DEEP) FRI: pick random z")
                 .add_scalars(2, "(DEEP) FRI: degree one B polynomial")
                 .challenge_scalars(1, "FRI COMMIT Phase: random scalar challenge")
                 .add_digest(1, "FRI COMMIT Phase: commit to folded codeword");
