@@ -3,15 +3,17 @@
 In this repo I implement a stark prover for learning purposes using arkworks.
 **Do not use this in a production environment.**
 
-🚧 This repo is WIP 🚧 I intend to add more features with time.
-
-currently system status:
-
 - Complete ✅
 - Soundness ✅
 - Non-interactive ✅
 - Succint ✅
 - Zero-Knowledge ✅ (see comments)
+
+Fields (with extension > 100 bits) supported out of the box:
+
+- Goldilocks ➰
+
+🚧 This repo is WIP 🚧 I intend to add more features with time.
 
 Issues/comments/critics all very welcome.
 
