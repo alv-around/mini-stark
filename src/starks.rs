@@ -121,20 +121,8 @@ where
 
         // 2. DEEP-ALI: receive random queries from verifier and prove the queries correspond to the
         //    previous work.
-        let mut queries = vec![
-            <F::Extension as ark_ff::Field>::BasePrimeField::zero();
-            self.0.constrain_queries
-                * (F::Extension::extension_degree() as usize)
-        ];
+        let mut queries = vec![F::Extension::zero(); self.0.constrain_queries];
         merlin.fill_challenge_scalars(&mut queries)?;
-        let queries = queries
-            .chunks_exact(F::Extension::extension_degree() as usize)
-            .map(|a| {
-                let base_elements: Vec<<F::Extension as ark_ff::Field>::BasePrimeField> =
-                    a.to_vec();
-                F::Extension::from_base_prime_field_elems(base_elements).unwrap()
-            })
-            .collect::<Vec<F::Extension>>();
         debug!(
             "Proving: 2. draw {} trace queries",
             self.0.constrain_queries
@@ -207,20 +195,8 @@ where
 
         // 2. build validity polynomial assert it matches the the query values provided in
         //    the proof
-        let mut queries = vec![
-            <F::Extension as ark_ff::Field>::BasePrimeField::zero();
-            self.0.constrain_queries
-                * (F::Extension::extension_degree() as usize)
-        ];
+        let mut queries = vec![F::Extension::zero(); self.0.constrain_queries];
         arthur.fill_challenge_scalars(&mut queries)?;
-        let queries = queries
-            .chunks_exact(F::Extension::extension_degree() as usize)
-            .map(|a| {
-                let base_elements: Vec<<F::Extension as ark_ff::Field>::BasePrimeField> =
-                    a.to_vec();
-                F::Extension::from_base_prime_field_elems(base_elements).unwrap()
-            })
-            .collect::<Vec<F::Extension>>();
         debug!("Verification: 2.1 queries from transcript retrieved");
 
         // 2.2 assert that the queries provided from constrain trace match commit
