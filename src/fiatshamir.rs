@@ -1,5 +1,6 @@
+use crate::field::StarkField;
 use crate::Hash;
-use ark_ff::Field;
+use ark_ff::{FftField, Field};
 use digest::core_api::BlockSizeUser;
 use digest::{generic_array::GenericArray, Digest, FixedOutputReset, OutputSizeUser};
 use nimue::{
@@ -29,7 +30,7 @@ where
     }
 }
 
-pub trait StarkIOPattern<D: Digest, F: Field> {
+pub trait StarkIOPattern<D: Digest, F: StarkField> {
     fn new_stark(
         domain_size_log: usize,
         constrain_queries: usize,
@@ -40,9 +41,9 @@ pub trait StarkIOPattern<D: Digest, F: Field> {
 
 impl<D, F> StarkIOPattern<D, F> for IOPattern<DigestBridge<D>>
 where
-    F: Field,
+    F: StarkField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
-    Self: FieldIOPattern<F> + DigestIOWritter<D> + FriIOPattern<D, F>,
+    Self: FieldIOPattern<F::Base> + DigestIOWritter<D> + FriIOPattern<D, F::Extension>,
 {
     fn new_stark(
         rounds: usize,
@@ -55,7 +56,10 @@ where
             .challenge_scalars(1, "ZK: pick random shift of domain")
             .add_digest(1, "commit to quotients")
             .challenge_scalars(1, "batching: retrieve random scalar r")
-            .challenge_scalars(constrain_queries, "number of queries in DEEP ALI")
+            .challenge_scalars(
+                constrain_queries * (F::Extension::extension_degree() as usize),
+                "number of queries in DEEP ALI",
+            )
             .add_fri(rounds, fri_queries)
     }
 }
@@ -85,7 +89,7 @@ pub trait FriIOPattern<D: Digest, F: Field> {
 
 impl<D, F> FriIOPattern<D, F> for IOPattern<DigestBridge<D>>
 where
-    F: Field,
+    F: FftField,
     D: Digest + FixedOutputReset + BlockSizeUser + Clone,
     IOPattern<DigestBridge<D>>: FieldIOPattern<F> + DigestIOWritter<D>,
 {

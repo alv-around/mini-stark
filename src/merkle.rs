@@ -1,5 +1,5 @@
 use crate::{error::MerkleProofError, util::logarithm_of_two_k, Hash};
-use ark_ff::PrimeField;
+use ark_ff::FftField;
 use digest::Digest;
 use log::trace;
 use std::marker::PhantomData;
@@ -31,7 +31,7 @@ pub trait Tree {
 
 /// Configuration for a Merkle Tree specifying its structure
 #[derive(Clone)]
-pub struct MerkleTreeConfig<D: Digest, F: PrimeField> {
+pub struct MerkleTreeConfig<D: Digest, F: FftField> {
     /// Number of leaves grouped under each lowest-level inner node
     pub leafs_per_node: usize,
     /// Number of children for each inner node (except lowest level)
@@ -53,7 +53,7 @@ pub struct MerkleTreeConfig<D: Digest, F: PrimeField> {
 /// Level 0:  0 1 2 3  4 5 6 7  8 9 10 11 12 13 14 15
 /// (Input)
 #[derive(Clone)]
-pub struct MerkleTree<D: Digest, F: PrimeField> {
+pub struct MerkleTree<D: Digest, F: FftField> {
     /// Vector containing all leaf values
     leafs: Vec<F>,
     /// Vector containing all inner nodes (hashes)
@@ -64,7 +64,7 @@ pub struct MerkleTree<D: Digest, F: PrimeField> {
     levels: usize,
 }
 
-impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
+impl<D: Digest, F: FftField> Tree for MerkleTree<D, F> {
     type Input = F;
     type Inner = Hash<D>;
     type Config = MerkleTreeConfig<D, F>;
@@ -177,7 +177,7 @@ impl<D: Digest, F: PrimeField> Tree for MerkleTree<D, F> {
     }
 }
 
-impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
+impl<F: FftField, D: Digest> MerkleTree<D, F> {
     /// Gets the index of a node's parent in the nodes vector
     ///
     /// # Arguments
@@ -290,7 +290,7 @@ impl<F: PrimeField, D: Digest> MerkleTree<D, F> {
 
 /// Structure representing a Merkle proof
 #[derive(Clone, Debug)]
-pub struct MerklePath<D: Digest, F: PrimeField> {
+pub struct MerklePath<D: Digest, F: FftField> {
     /// Leaf values that share the same parent as the target leaf
     pub(super) leaf_neighbours: Vec<F>,
     /// Sibling groups at each level needed to reconstruct the root
@@ -309,7 +309,7 @@ impl<D: Digest> MerkleRoot<D> {
     ///
     /// # Returns
     /// true if the proof is valid, false otherwise
-    pub fn check_proof<F: PrimeField>(&self, proof: MerklePath<D, F>) -> bool {
+    pub fn check_proof<F: FftField>(&self, proof: MerklePath<D, F>) -> bool {
         // Start by hashing the leaf group
         let mut previous = MerkleTree::<D, F>::calculate_from_leafs(&proof.leaf_neighbours);
         trace!(
@@ -341,50 +341,52 @@ impl<D: Digest> MerkleRoot<D> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::field::Goldilocks;
+    use crate::field::GoldilocksFp;
     use sha2::Sha256;
     use std::panic;
 
     // Test configurations
-    const TWO: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+    const TWO: MerkleTreeConfig<Sha256, GoldilocksFp> = MerkleTreeConfig {
         leafs_per_node: 2,
         inner_children: 2,
         _digest: PhantomData::<Sha256>,
-        _field: PhantomData::<Goldilocks>,
+        _field: PhantomData::<GoldilocksFp>,
     };
 
-    const TWO_FOUR: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+    const TWO_FOUR: MerkleTreeConfig<Sha256, GoldilocksFp> = MerkleTreeConfig {
         leafs_per_node: 4,
         inner_children: 2,
         _digest: PhantomData::<Sha256>,
-        _field: PhantomData::<Goldilocks>,
+        _field: PhantomData::<GoldilocksFp>,
     };
 
-    const FOUR: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+    const FOUR: MerkleTreeConfig<Sha256, GoldilocksFp> = MerkleTreeConfig {
         leafs_per_node: 4,
         inner_children: 4,
         _digest: PhantomData::<Sha256>,
-        _field: PhantomData::<Goldilocks>,
+        _field: PhantomData::<GoldilocksFp>,
     };
 
-    const SIXTEEN: MerkleTreeConfig<Sha256, Goldilocks> = MerkleTreeConfig {
+    const SIXTEEN: MerkleTreeConfig<Sha256, GoldilocksFp> = MerkleTreeConfig {
         leafs_per_node: 16,
         inner_children: 16,
         _digest: PhantomData::<Sha256>,
-        _field: PhantomData::<Goldilocks>,
+        _field: PhantomData::<GoldilocksFp>,
     };
 
-    fn make_tree(config: MerkleTreeConfig<Sha256, Goldilocks>) -> MerkleTree<Sha256, Goldilocks> {
-        let leafs: Vec<Goldilocks> = (0..16).map(Goldilocks::from).collect();
+    fn make_tree(
+        config: MerkleTreeConfig<Sha256, GoldilocksFp>,
+    ) -> MerkleTree<Sha256, GoldilocksFp> {
+        let leafs: Vec<GoldilocksFp> = (0..16).map(GoldilocksFp::from).collect();
         MerkleTree::<Sha256, _>::new(&leafs, config)
     }
 
     #[test]
     fn test_panic_for_not_full_trees() {
         let leafs = vec![
-            Goldilocks::from(0),
-            Goldilocks::from(1),
-            Goldilocks::from(2),
+            GoldilocksFp::from(0),
+            GoldilocksFp::from(1),
+            GoldilocksFp::from(2),
         ];
 
         let result = panic::catch_unwind(|| {
@@ -463,11 +465,11 @@ mod test {
         let tree = make_tree(TWO);
         let root = tree.root();
 
-        let f_one = Goldilocks::from(7);
+        let f_one = GoldilocksFp::from(7);
         let proof = tree.generate_proof(&f_one).unwrap();
         assert!(proof.leaf_neighbours.contains(&f_one));
         assert_eq!(proof.path.len(), 3);
-        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(proof));
+        assert!(MerkleRoot::<Sha256>(root).check_proof::<GoldilocksFp>(proof));
 
         let tree = make_tree(TWO_FOUR);
         let root = tree.root();
@@ -475,6 +477,6 @@ mod test {
         let proof = tree.generate_proof(&f_one).unwrap();
         assert!(proof.leaf_neighbours.contains(&f_one));
         assert_eq!(proof.path.len(), 2);
-        assert!(MerkleRoot::<Sha256>(root).check_proof::<Goldilocks>(proof));
+        assert!(MerkleRoot::<Sha256>(root).check_proof::<GoldilocksFp>(proof));
     }
 }
