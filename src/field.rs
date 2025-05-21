@@ -1,6 +1,8 @@
-use ark_ff::fields::{Fp2Config, MontFp};
+use ark_ff::fields::{Fp2Config, Fp4Config, MontFp};
 use ark_ff::fields::{MontBackend, MontConfig};
-use ark_ff::{FftField, Field, Fp, Fp2ConfigWrapper, PrimeField, QuadExtField};
+use ark_ff::{
+    FftField, Field, Fp, Fp2, Fp2ConfigWrapper, Fp4ConfigWrapper, PrimeField, QuadExtField,
+};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 
 // ========== Stark Field Config ==========
@@ -9,7 +11,7 @@ pub trait StarkField {
     type Extension: Field<BasePrimeField = Self::Base> + Clone + FftField;
 
     // Compile-time safety check
-    fn SOUNDNESS_CHECK(&self) {
+    fn soundness_check(&self) {
         // Verify extension field size > 2^100 (Goldilocks² has 128-bit modulus)
         assert!(
             <Self::Base as PrimeField>::MODULUS_BIT_SIZE as u64
@@ -59,11 +61,52 @@ impl Fp2Config for GoldilocksFp2Config {
     ];
 }
 
+// BabyBear implementation
+pub struct BabyBear;
+
+impl StarkField for BabyBear {
+    type Base = BabyBearFp;
+    type Extension = BabyBearFp4;
+}
+
 #[derive(MontConfig)]
 #[modulus = "2013265921"]
 #[generator = "7"]
 pub struct BabyBearConfig;
-pub type BabyBear = Fp<MontBackend<BabyBearConfig, 1>, 1>;
+pub type BabyBearFp = Fp<MontBackend<BabyBearConfig, 1>, 1>;
+
+pub type BabyBearFp2 = QuadExtField<BabyBearQuadraticExtensionConfig>;
+pub type BabyBearQuadraticExtensionConfig = Fp2ConfigWrapper<BabyBearFp2Config>;
+pub struct BabyBearFp2Config;
+impl Fp2Config for BabyBearFp2Config {
+    type Fp = BabyBearFp;
+    // Fq(11)**(Fq(-1) / 2) == -1
+    const NONRESIDUE: Self::Fp = MontFp!("11");
+    const FROBENIUS_COEFF_FP2_C1: &'static [Self::Fp] = &[
+        // Fq(11)**(((q^0) - 1) / 2)
+        MontFp!("1"),
+        // Fq(11)**(((q^1) - 1) / 2)
+        MontFp!("2013265920"),
+    ];
+}
+
+pub type BabyBearFp4 = QuadExtField<BabyBearQuarticExtensionConfig>;
+pub type BabyBearQuarticExtensionConfig = Fp4ConfigWrapper<BabyBearFp4Config>;
+pub struct BabyBearFp4Config;
+impl Fp4Config for BabyBearFp4Config {
+    type Fp2Config = BabyBearFp2Config;
+    const NONRESIDUE: Fp2<Self::Fp2Config> = BabyBearFp2::new(MontFp!("2013265910"), MontFp!("1"));
+    const FROBENIUS_COEFF_FP4_C1: &'static [<Self::Fp2Config as Fp2Config>::Fp] = &[
+        // NONRESIDUE^(((q^0) - 1) / 4)
+        MontFp!("1"),
+        // Fp2::NONRESIDUE^(((q^1) - 1) / 4)
+        MontFp!("1728404513"),
+        // Fp2::NONRESIDUE^(((q^2) - 1) / 4)
+        MontFp!("2013265920"),
+        // Fp2::NONRESIDUE^(((q^3) - 1) / 4)
+        MontFp!("284861408"),
+    ];
+}
 
 #[cfg(test)]
 mod test {
