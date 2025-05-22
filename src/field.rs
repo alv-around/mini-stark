@@ -71,7 +71,7 @@ impl StarkField for BabyBear {
 
 #[derive(MontConfig)]
 #[modulus = "2013265921"]
-#[generator = "7"]
+#[generator = "440564289"]
 pub struct BabyBearConfig;
 pub type BabyBearFp = Fp<MontBackend<BabyBearConfig, 1>, 1>;
 
