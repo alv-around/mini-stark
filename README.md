@@ -12,6 +12,7 @@ In this repo I implement a stark prover for learning purposes using arkworks.
 Fields (with extension > 100 bits) supported out of the box:
 
 - Goldilocks ➰
+- BabyBear 🧸
 
 🚧 This repo is WIP 🚧 I intend to add more features with time.
 
